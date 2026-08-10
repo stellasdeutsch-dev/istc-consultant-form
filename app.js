@@ -48,20 +48,16 @@ const GEOGRAPHY_OPTIONS = [
 ];
 
 const TOTAL_STEPS = 11;
-const DRAFT_KEY = 'istc-eoi-draft-v2';
+const DRAFT_KEY = 'istc-eoi-draft-v3';
 const MAX_ASSIGNMENTS = 3;
 
 /* ------------------------------------------------------------ State */
-
-function emptyAssignment() {
-  return { title: '', client: '', country: '', duration: '', role: '', description: '' };
-}
 
 const state = {
   step: 0, // 0 = intro, 1..11 = form, 12 = success
   files: { cv: null, certifications: null, publications: null },
   languages: [], // [{ name, level }]
-  assignments: [emptyAssignment()],
+  assignments: [''], // one free-text block per assignment, up to 3
 };
 
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -364,41 +360,23 @@ function serializeLanguages() {
 const assignmentsList = $('#assignmentsList');
 const addAssignmentBtn = $('#addAssignment');
 
-const ASSIGNMENT_FIELDS = [
-  ['title', 'Title of project', 'e.g. Biosafety capacity building programme', 'full'],
-  ['client', 'Client / Organization', 'e.g. UNODA, EU CBRN CoE', ''],
-  ['country', 'Country', '', ''],
-  ['duration', 'Duration', 'e.g. Mar 2022 – Jan 2023', ''],
-  ['role', 'Your role', 'e.g. Lead consultant', ''],
-];
+const ASSIGNMENT_PLACEHOLDER =
+  'e.g. Biosafety capacity building programme — UNODA, Kazakhstan, Mar 2022 – Jan 2023, Lead consultant.\n'
+  + 'Designed and delivered national biosafety training for 120 laboratory specialists…';
 
 function renderAssignments() {
   assignmentsList.innerHTML = state.assignments
     .map(
-      (a, i) => `
+      (text, i) => `
       <div class="assignment-card">
         <div class="assignment-head">
-          <span class="assignment-num">Assignment ${i + 1}${i > 0 ? ' · optional' : ''}</span>
+          <label class="assignment-num" for="assignment-${i}">Assignment ${i + 1}${i > 0 ? ' · optional' : ''}</label>
           ${state.assignments.length > 1
             ? `<button type="button" class="assignment-remove" data-remove="${i}">Remove</button>`
             : ''}
         </div>
-        <div class="assignment-grid">
-          ${ASSIGNMENT_FIELDS.map(
-            ([key, label, placeholder, span]) => `
-            <div${span === 'full' ? ' class="full"' : ''}>
-              <label class="sub-label" for="a-${key}-${i}">${label}</label>
-              <input class="text-input text-input-sm" type="text" id="a-${key}-${i}"
-                data-i="${i}" data-k="${key}" value="${escapeHtml(a[key])}"
-                ${placeholder ? `placeholder="${escapeHtml(placeholder)}"` : ''} />
-            </div>`
-          ).join('')}
-          <div class="full">
-            <label class="sub-label" for="a-description-${i}">Short description</label>
-            <textarea class="text-input text-input-sm" id="a-description-${i}" rows="3"
-              data-i="${i}" data-k="description">${escapeHtml(a.description)}</textarea>
-          </div>
-        </div>
+        <textarea class="text-input assignment-text" id="assignment-${i}" rows="4"
+          data-i="${i}" placeholder="${escapeHtml(ASSIGNMENT_PLACEHOLDER)}">${escapeHtml(text)}</textarea>
       </div>`
     )
     .join('');
@@ -406,9 +384,9 @@ function renderAssignments() {
 }
 
 assignmentsList.addEventListener('input', (e) => {
-  const { i, k } = e.target.dataset;
-  if (i == null || !k) return;
-  state.assignments[Number(i)][k] = e.target.value;
+  const { i } = e.target.dataset;
+  if (i == null) return;
+  state.assignments[Number(i)] = e.target.value;
   saveDraft();
 });
 
@@ -416,31 +394,27 @@ assignmentsList.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-remove]');
   if (!btn) return;
   state.assignments.splice(Number(btn.dataset.remove), 1);
-  if (!state.assignments.length) state.assignments.push(emptyAssignment());
+  if (!state.assignments.length) state.assignments.push('');
   renderAssignments();
   saveDraft();
 });
 
 addAssignmentBtn.addEventListener('click', () => {
   if (state.assignments.length >= MAX_ASSIGNMENTS) return;
-  state.assignments.push(emptyAssignment());
+  state.assignments.push('');
   renderAssignments();
-  const idx = state.assignments.length - 1;
-  const first = document.getElementById(`a-title-${idx}`);
-  if (first) first.focus();
+  const added = document.getElementById(`assignment-${state.assignments.length - 1}`);
+  if (added) added.focus();
   saveDraft();
 });
 
 function filledAssignments() {
-  return state.assignments.filter((a) => Object.values(a).some((v) => v && v.trim()));
+  return state.assignments.map((t) => t.trim()).filter(Boolean);
 }
 
 function serializeAssignments() {
   return filledAssignments()
-    .map((a, i) => {
-      const meta = [a.client, a.country, a.duration, a.role].filter(Boolean).join(' · ');
-      return `${i + 1}. ${a.title || 'Untitled'}${meta ? ' — ' + meta : ''}${a.description ? '\n' + a.description : ''}`;
-    })
+    .map((text, i) => `${i + 1}. ${text}`)
     .join('\n\n');
 }
 
@@ -458,13 +432,30 @@ const validators = {
   2() {
     const errors = [];
     if (isFirm() && !getValue('orgName')) errors.push(['orgName', 'Please enter your organization name.']);
-    if (!getValue('fullName')) errors.push(['fullName', 'Please enter a name.']);
-    if (!getValue('nationality')) errors.push(['nationality', 'Please enter your nationality.']);
-    if (!getValue('countryResidence')) errors.push(['countryResidence', 'Please enter your country of residence.']);
+
+    const fullName = getValue('fullName');
+    if (!fullName) errors.push(['fullName', 'Please enter a name.']);
+    else if (!/\p{L}.*\p{L}/u.test(fullName)) errors.push(['fullName', 'Please enter a real name.']);
+
+    const nameLike = (v) => /^\p{L}[\p{L}\s'’.()\-]*$/u.test(v);
+    const nationality = getValue('nationality');
+    if (!nationality) errors.push(['nationality', 'Please enter your nationality.']);
+    else if (!nameLike(nationality)) errors.push(['nationality', 'Please enter a valid nationality, e.g. Kazakhstani.']);
+
+    const country = getValue('countryResidence');
+    if (!country) errors.push(['countryResidence', 'Please enter your country of residence.']);
+    else if (!nameLike(country)) errors.push(['countryResidence', 'Please enter a valid country name.']);
+
     const email = getValue('email');
     if (!email) errors.push(['email', 'Please enter your email address.']);
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push(['email', 'That doesn’t look like a valid email address.']);
-    if (!getValue('phone')) errors.push(['phone', 'Please enter your phone number.']);
+
+    const phone = getValue('phone');
+    const phoneDigits = phone.replace(/\D/g, '');
+    if (!phone) errors.push(['phone', 'Please enter your phone number.']);
+    else if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+      errors.push(['phone', 'Please enter a valid phone number, e.g. +7 700 123 4567.']);
+    }
     return errors;
   },
   3() {
@@ -504,9 +495,9 @@ const validators = {
     else if (words < CONFIG.MIN_SUMMARY_WORDS) {
       errors.push(['summary', `Please write at least ${CONFIG.MIN_SUMMARY_WORDS} words (currently ${words}).`]);
     }
-    const first = state.assignments[0] || emptyAssignment();
-    if (!first.title.trim() || !first.description.trim()) {
-      errors.push(['assignments', 'Please provide at least the project title and a short description for Assignment 1.']);
+    const first = (state.assignments[0] || '').trim();
+    if (first.length < 20) {
+      errors.push(['assignments', 'Please describe Assignment 1 — include the project title, client, and a short description.']);
     }
     return errors;
   },
@@ -672,6 +663,31 @@ summaryEl.addEventListener('input', () => {
   summaryCounter.classList.toggle('ok', words >= CONFIG.MIN_SUMMARY_WORDS);
 });
 
+/* ------------------------------------------------------------ Input sanitizers */
+
+// Phone: only digits, one leading +, spaces, parentheses, dashes — letters never appear
+const phoneEl = $('#phone');
+phoneEl.addEventListener('input', () => {
+  const cleaned = phoneEl.value
+    .replace(/[^\d+()\-\s]/g, '')
+    .replace(/(?!^)\+/g, ''); // + allowed only as the first character
+  if (cleaned !== phoneEl.value) {
+    const pos = phoneEl.selectionStart - (phoneEl.value.length - cleaned.length);
+    phoneEl.value = cleaned;
+    phoneEl.setSelectionRange(Math.max(0, pos), Math.max(0, pos));
+  }
+});
+
+// Live "valid" affordance on email as you type
+const emailEl = $('#email');
+emailEl.addEventListener('input', () => {
+  if (emailEl.getAttribute('aria-invalid') && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailEl.value.trim())) {
+    emailEl.removeAttribute('aria-invalid');
+    const errEl = form.querySelector('[data-error-for="email"]');
+    if (errEl) errEl.hidden = true;
+  }
+});
+
 /* ------------------------------------------------------------ Rate helper */
 
 const dailyRateEl = $('#dailyRate');
@@ -689,6 +705,13 @@ function updateRateHint() {
 }
 
 dailyRateEl.addEventListener('input', updateRateHint);
+
+// Number fields: block exponent/sign keys so only digits (and a dot) can be typed
+[dailyRateEl, hourlyRateEl].forEach((el) =>
+  el.addEventListener('keydown', (e) => {
+    if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault();
+  })
+);
 
 /* ------------------------------------------------------------ File uploads */
 
@@ -861,7 +884,14 @@ function restoreDraft() {
     renderLanguageChips();
   }
   if (Array.isArray(draft.assignmentsList) && draft.assignmentsList.length) {
-    state.assignments = draft.assignmentsList.slice(0, MAX_ASSIGNMENTS).map((a) => ({ ...emptyAssignment(), ...a }));
+    state.assignments = draft.assignmentsList
+      .slice(0, MAX_ASSIGNMENTS)
+      .map((a) => {
+        if (typeof a === 'string') return a;
+        // migrate old structured drafts to free text
+        const meta = [a.client, a.country, a.duration, a.role].filter(Boolean).join(', ');
+        return [[a.title, meta].filter(Boolean).join(' — '), a.description || ''].filter(Boolean).join('\n');
+      });
     renderAssignments();
   }
 
@@ -929,7 +959,10 @@ function renderReview() {
       rows: [
         ['Languages', data.languages],
         ['Summary', `${wordCount(data.summary)} words`],
-        ['Key assignments', filledAssignments().map((a) => a.title || 'Untitled').join('\n') || '—'],
+        ['Key assignments', filledAssignments().map((t) => {
+          const firstLine = t.split('\n')[0];
+          return firstLine.length > 90 ? `${firstLine.slice(0, 90)}…` : firstLine;
+        }).join('\n') || '—'],
       ],
     },
     {

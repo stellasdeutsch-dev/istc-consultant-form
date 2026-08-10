@@ -1079,33 +1079,15 @@ legend.field-label { margin-bottom: 0.75rem; }
 .assignment-remove:hover { background: var(--danger-tint); }
 .assignment-remove:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
-.assignment-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-}
-
-@media (max-width: 560px) {
-  .assignment-grid { grid-template-columns: 1fr; }
-}
-
-.assignment-grid .full { grid-column: 1 / -1; }
-
-.sub-label {
-  display: block;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-  margin-bottom: 0.25rem;
-}
-
-.text-input-sm {
+.assignment-text {
   font-size: 0.9375rem;
-  padding: 0.5625rem 0.75rem;
   background: var(--surface);
+  min-height: 6.5rem;
+  resize: vertical;
+  line-height: 1.55;
 }
 
-textarea.text-input-sm { min-height: 4.5rem; resize: vertical; line-height: 1.5; }
+.assignment-text::placeholder { color: var(--text-tertiary); }
 
 .btn-add {
   display: flex;
