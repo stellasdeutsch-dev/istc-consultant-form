@@ -518,9 +518,18 @@ body {
 
 .country.is-on { fill: var(--accent); }
 
+/* Hover: fill the whole territory, not just name it. Declared after .is-on
+   (same specificity) so hovering a selected country still reads as hover. */
+.country.is-hover {
+  fill: var(--accent-2);
+  stroke: var(--surface);
+  stroke-width: 0.9;
+  transition-duration: 120ms;
+}
+
+.country.is-on.is-hover { fill: var(--accent-hover); }
+
 .is-picker .country { cursor: pointer; transition: fill 180ms var(--ease-out); }
-.is-picker .country:hover { fill: var(--accent-2); }
-.is-picker .country.is-on:hover { fill: var(--accent-hover); }
 
 .country.flash { animation: flash-country 900ms var(--ease-out); }
 

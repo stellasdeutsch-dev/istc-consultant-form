@@ -101,14 +101,37 @@ function createWorldMap(container, options = {}) {
     tooltip.style.top = `${y}px`;
   }
 
+  /* ------------------------------------------------ hover highlight */
+
+  let hovered = null;
+
+  function setHovered(path) {
+    if (path === hovered) return;
+    if (hovered) hovered.classList.remove('is-hover');
+    hovered = path;
+    if (!path) return;
+    path.classList.add('is-hover');
+    // SVG has no z-index: paint order is document order. Move the hovered
+    // country last so its outline isn't overdrawn by its neighbours.
+    svg.appendChild(path);
+  }
+
   svg.addEventListener('pointermove', (e) => {
     const path = e.target.closest('.country');
-    if (!path) { tooltip.hidden = true; return; }
+    if (!path) {
+      tooltip.hidden = true;
+      setHovered(null);
+      return;
+    }
+    setHovered(path);
     const c = COUNTRY_BY_ID.get(path.dataset.id);
     showTip(mode === 'picker' && selected.has(c.i) ? `${c.n} · selected` : c.n, e);
   });
 
-  svg.addEventListener('pointerleave', () => { tooltip.hidden = true; });
+  svg.addEventListener('pointerleave', () => {
+    tooltip.hidden = true;
+    setHovered(null);
+  });
 
   /* ------------------------------------------------ picker interaction */
 
