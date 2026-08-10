@@ -232,8 +232,8 @@ function icon(name, cls = '') {
     'Long-term (>12 months)': 'calendar',
     'Remote only': 'remote',
     'Field-based assignments possible': 'pin',
-    No: 'cross',
-    Yes: 'history',
+    // Previous collaboration is a plain Yes/No — the radio itself is the
+    // answer, so an icon there would be noise.
     // Areas of expertise
     'Chemical Risk, Safety & Security': 'flask',
     'Biological Risk, Safety & Security': 'bio',

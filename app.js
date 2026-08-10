@@ -452,12 +452,37 @@ function renderAssignments() {
     )
     .join('');
   addAssignmentBtn.hidden = state.assignments.length >= MAX_ASSIGNMENTS;
+  growAllAssignments();
+}
+
+/* Grow the box with its content instead of scrolling inside a short window —
+   an assignment you can't read back is worse than a tall form. */
+const ASSIGNMENT_MAX_PX = 560;
+
+function autoGrow(el) {
+  // A hidden element reports scrollHeight 0, which would collapse the box —
+  // measuring is deferred until the step is actually on screen.
+  if (!el || !el.offsetParent) return;
+  el.style.height = 'auto';
+  // scrollHeight covers content + padding but not the border, while
+  // box-sizing:border-box counts the border in `height` — add it back or the
+  // last line stays clipped by ~2px and the box scrolls anyway.
+  const cs = getComputedStyle(el);
+  const border = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+  const full = el.scrollHeight + border;
+  el.style.height = `${Math.min(full, ASSIGNMENT_MAX_PX)}px`;
+  el.style.overflowY = full > ASSIGNMENT_MAX_PX ? 'auto' : 'hidden';
+}
+
+function growAllAssignments() {
+  $$('.assignment-text', assignmentsList).forEach(autoGrow);
 }
 
 assignmentsList.addEventListener('input', (e) => {
   const { i } = e.target.dataset;
   if (i == null) return;
   state.assignments[Number(i)] = e.target.value;
+  autoGrow(e.target);
   saveDraft();
 });
 
@@ -732,6 +757,7 @@ function goToStep(next, { animate = true } = {}) {
   if (heading) heading.focus({ preventScroll: true });
 
   if (next === 2) syncLegalStatusUI();
+  if (next === 6) growAllAssignments(); // now visible, so it can be measured
   if (next === TOTAL_STEPS) renderReview();
 }
 
@@ -833,17 +859,46 @@ const dailyRateEl = $('#dailyRate');
 const hourlyRateEl = $('#hourlyRate');
 const rateHint = $('#rateHint');
 
+const HOURS_PER_DAY = 8;
+
+// Track which field we filled in, so a suggestion can be refined later but a
+// number the applicant typed themselves is never overwritten.
+let dailyIsSuggested = false;
+let hourlyIsSuggested = false;
+
 function updateRateHint() {
   const daily = Number(dailyRateEl.value);
-  if (daily > 0) {
-    rateHint.textContent = `For reference: €${daily} / day ≈ €${Math.round(daily / 8)} / hour on an 8-hour day.`;
+  const hourly = Number(hourlyRateEl.value);
+  if (daily > 0 && hourly > 0) {
+    const suggested = dailyIsSuggested || hourlyIsSuggested;
+    rateHint.textContent = suggested
+      ? `Based on an ${HOURS_PER_DAY}-hour day we filled in the other rate — edit it if your rate differs.`
+      : `That works out to ${(daily / hourly).toFixed(1)} hours per day.`;
     rateHint.hidden = false;
   } else {
     rateHint.hidden = true;
   }
 }
 
-dailyRateEl.addEventListener('input', updateRateHint);
+dailyRateEl.addEventListener('input', () => {
+  dailyIsSuggested = false;
+  const daily = Number(dailyRateEl.value);
+  if (daily > 0 && (!hourlyRateEl.value || hourlyIsSuggested)) {
+    hourlyRateEl.value = Math.round(daily / HOURS_PER_DAY);
+    hourlyIsSuggested = true;
+  }
+  updateRateHint();
+});
+
+hourlyRateEl.addEventListener('input', () => {
+  hourlyIsSuggested = false;
+  const hourly = Number(hourlyRateEl.value);
+  if (hourly > 0 && (!dailyRateEl.value || dailyIsSuggested)) {
+    dailyRateEl.value = Math.round(hourly * HOURS_PER_DAY);
+    dailyIsSuggested = true;
+  }
+  updateRateHint();
+});
 
 // Number fields: block exponent/sign keys so only digits (and a dot) can be typed
 [dailyRateEl, hourlyRateEl].forEach((el) =>
