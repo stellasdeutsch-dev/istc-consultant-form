@@ -8,6 +8,27 @@
 (function landing() {
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
+  /* ---------------------------------------------------------- Schema-derived copy
+
+     The landing page quotes counts that an admin can change in admin.html,
+     so read them from the schema rather than letting the markup go stale. */
+
+  const stats = {
+    steps: () => (typeof schema !== 'undefined' ? schema.steps.length + 1 : null),
+    'expertise-options': () => {
+      if (typeof schema === 'undefined') return null;
+      const q = schema.steps.flatMap((s) => s.questions)
+        .filter((x) => Array.isArray(x.options))
+        .sort((a, b) => b.options.length - a.options.length)[0];
+      return q ? q.options.length : null;
+    },
+  };
+
+  document.querySelectorAll('[data-schema-stat]').forEach((el) => {
+    const value = stats[el.dataset.schemaStat]?.();
+    if (value != null) el.textContent = String(value);
+  });
+
   /* ---------------------------------------------------------- Showcase map */
 
   const stage = document.getElementById('showcaseMap');

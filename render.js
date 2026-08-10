@@ -350,7 +350,9 @@ const ADAPTERS = {
     get: (q) => window.__countryPickers?.[q.id]?.getSelection() || { ids: [], names: [], regions: [] },
     set: (q, v) => {
       const p = window.__countryPickers?.[q.id];
-      if (p && v?.ids) p.setSelection(v.ids);
+      if (!p || !v?.ids) return;
+      p.setSelection(v.ids);
+      if (p.refreshUi) p.refreshUi(); // chips, counter and region buttons
     },
     validate: (q) => (q.required && !(window.__countryPickers?.[q.id]?.size())
       ? 'Please select at least one country — click the map, or add a whole region.' : null),

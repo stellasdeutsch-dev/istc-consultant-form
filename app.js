@@ -312,6 +312,10 @@ function initCountryQuestion(q) {
     onChange: () => { paint(); saveDraft(); },
   });
   window.__countryPickers[q.id] = picker;
+  // setSelection() repaints the map but fires no onChange, so restoring a
+  // draft would leave the chips, counter and region buttons stale. Expose the
+  // repaint so whoever sets the selection can bring the rest back in step.
+  picker.refreshUi = () => paint();
 
   function paint() {
     const { ids } = picker.getSelection();
