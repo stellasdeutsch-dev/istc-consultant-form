@@ -1,6 +1,7 @@
 /* ============================================================
    ISTC Consultant Database — Expression of Interest
-   Multi-step form: navigation, validation, files, submission.
+   Multi-step form: navigation, validation, smart inputs,
+   files, drafts, submission. Depends on data.js lists.
    ============================================================ */
 
 'use strict';
@@ -47,13 +48,20 @@ const GEOGRAPHY_OPTIONS = [
 ];
 
 const TOTAL_STEPS = 11;
-const DRAFT_KEY = 'istc-eoi-draft-v1';
+const DRAFT_KEY = 'istc-eoi-draft-v2';
+const MAX_ASSIGNMENTS = 3;
 
 /* ------------------------------------------------------------ State */
+
+function emptyAssignment() {
+  return { title: '', client: '', country: '', duration: '', role: '', description: '' };
+}
 
 const state = {
   step: 0, // 0 = intro, 1..11 = form, 12 = success
   files: { cv: null, certifications: null, publications: null },
+  languages: [], // [{ name, level }]
+  assignments: [emptyAssignment()],
 };
 
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -64,9 +72,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 const form = $('#eoiForm');
-const steps = new Map(
-  $$('.step').map((el) => [el.dataset.step, el])
-);
+const steps = new Map($$('.step').map((el) => [el.dataset.step, el]));
 const stepNav = $('#stepNav');
 const backBtn = $('#backBtn');
 const nextBtn = $('#nextBtn');
@@ -74,28 +80,27 @@ const startBtn = $('#startBtn');
 const progressFill = $('#progressFill');
 const stepIndicator = $('#stepIndicator');
 const siteHeader = $('#siteHeader');
+const themeToggle = $('#themeToggle');
+const languageInput = $('#languageInput');
+const languageChipsEl = $('#languageChips');
+const languageField = $('#languageField');
 
-/* ------------------------------------------------------------ Option injection */
+/* ------------------------------------------------------------ Theme (light by default, dark opt-in) */
 
-function slug(value) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  themeToggle.setAttribute(
+    'aria-label',
+    theme === 'dark' ? 'Switch to light appearance' : 'Switch to dark appearance'
+  );
+  try { localStorage.setItem('istc-theme', theme); } catch (_) { /* ignore */ }
 }
 
-function injectOptions(container, name, options) {
-  container.innerHTML = options
-    .map(
-      (value) => `
-      <label class="option option-compact">
-        <input type="checkbox" name="${name}" value="${value.replace(/"/g, '&quot;')}" />
-        <span class="option-check option-check-square" aria-hidden="true"></span>
-        <span class="option-body"><span class="option-title">${value}</span></span>
-      </label>`
-    )
-    .join('');
-}
+themeToggle.addEventListener('click', () => {
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+});
 
-injectOptions($('[data-error-anchor="expertise"]'), 'expertise', EXPERTISE_OPTIONS);
-injectOptions($('[data-error-anchor="geography"]'), 'geography', GEOGRAPHY_OPTIONS);
+applyTheme(document.documentElement.dataset.theme || 'light');
 
 /* ------------------------------------------------------------ Helpers */
 
@@ -127,6 +132,32 @@ function isFirm() {
   return getRadio('legalStatus') === 'Consulting Firm / Organization';
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/* ------------------------------------------------------------ Option injection */
+
+function injectOptions(container, name, options) {
+  container.innerHTML = options
+    .map(
+      (value) => `
+      <label class="option option-compact">
+        <input type="checkbox" name="${name}" value="${escapeHtml(value)}" />
+        <span class="option-check option-check-square" aria-hidden="true"></span>
+        <span class="option-body"><span class="option-title">${escapeHtml(value)}</span></span>
+      </label>`
+    )
+    .join('');
+}
+
+injectOptions($('[data-error-anchor="expertise"]'), 'expertise', EXPERTISE_OPTIONS);
+injectOptions($('[data-error-anchor="geography"]'), 'geography', GEOGRAPHY_OPTIONS);
+
 /* ------------------------------------------------------------ Errors */
 
 function showError(key, message) {
@@ -152,6 +183,268 @@ function clearErrors(stepEl) {
   });
   $$('[aria-invalid]', stepEl).forEach((el) => el.removeAttribute('aria-invalid'));
 }
+
+/* ------------------------------------------------------------ Autocomplete (combobox) */
+
+function attachAutocomplete(input, items, { onSelect } = {}) {
+  const anchor = input.closest('.field') || input.parentElement;
+  anchor.classList.add('combo-anchor');
+
+  const menu = document.createElement('div');
+  menu.className = 'combo-menu';
+  menu.setAttribute('role', 'listbox');
+  menu.hidden = true;
+  anchor.appendChild(menu);
+
+  let current = [];
+  let active = -1;
+
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-expanded', 'false');
+  input.setAttribute('autocomplete', 'off');
+
+  function close() {
+    menu.hidden = true;
+    active = -1;
+    input.setAttribute('aria-expanded', 'false');
+  }
+
+  function paint() {
+    [...menu.children].forEach((el, i) => el.classList.toggle('active', i === active));
+    const el = menu.children[active];
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+
+  function open(list) {
+    current = list;
+    active = -1;
+    menu.innerHTML = list
+      .map((v, i) => `<button type="button" class="combo-option" role="option" data-i="${i}">${escapeHtml(v)}</button>`)
+      .join('');
+    menu.hidden = !list.length;
+    input.setAttribute('aria-expanded', String(!!list.length));
+  }
+
+  function filter() {
+    const q = input.value.trim().toLowerCase();
+    if (!q) return close();
+    const list = items
+      .filter((v) => v.toLowerCase().includes(q))
+      .sort((a, b) => Number(b.toLowerCase().startsWith(q)) - Number(a.toLowerCase().startsWith(q)))
+      .slice(0, 8);
+    open(list);
+  }
+
+  function choose(i) {
+    const value = current[i];
+    if (value == null) return;
+    if (onSelect) {
+      onSelect(value);
+    } else {
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    close();
+  }
+
+  input.addEventListener('input', filter);
+  input.addEventListener('focus', filter);
+  input.addEventListener('blur', () => setTimeout(close, 120));
+  menu.addEventListener('pointerdown', (e) => e.preventDefault()); // keep input focus
+  menu.addEventListener('click', (e) => {
+    const btn = e.target.closest('.combo-option');
+    if (btn) choose(Number(btn.dataset.i));
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (menu.hidden) {
+      if (e.key === 'ArrowDown') filter();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      active = Math.min(active + 1, current.length - 1);
+      paint();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      active = Math.max(active - 1, 0);
+      paint();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      choose(active >= 0 ? active : 0);
+    } else if (e.key === 'Escape' || e.key === 'Tab') {
+      close();
+    }
+  });
+}
+
+attachAutocomplete($('#nationality'), NATIONALITIES);
+attachAutocomplete($('#countryResidence'), COUNTRIES);
+
+/* ------------------------------------------------------------ Languages (chips with proficiency) */
+
+function renderLanguageChips() {
+  languageChipsEl.innerHTML = state.languages
+    .map(
+      (lang, i) => `
+      <span class="chip">
+        <span class="chip-name">${escapeHtml(lang.name)}</span>
+        <select class="chip-level" data-i="${i}" aria-label="Proficiency for ${escapeHtml(lang.name)}">
+          ${PROFICIENCY_LEVELS.map(
+            (level) => `<option value="${level}"${level === lang.level ? ' selected' : ''}>${level}</option>`
+          ).join('')}
+        </select>
+        <button type="button" class="chip-x" data-i="${i}" aria-label="Remove ${escapeHtml(lang.name)}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </span>`
+    )
+    .join('');
+}
+
+function addLanguage(name, level = 'Working') {
+  const clean = name.trim().replace(/,+$/, '');
+  if (!clean) return;
+  if (state.languages.some((l) => l.name.toLowerCase() === clean.toLowerCase())) return;
+  state.languages.push({ name: clean, level });
+  renderLanguageChips();
+  const errEl = form.querySelector('[data-error-for="languages"]');
+  if (errEl) { errEl.hidden = true; }
+  languageField.removeAttribute('aria-invalid');
+  saveDraft();
+}
+
+attachAutocomplete(languageInput, LANGUAGES, {
+  onSelect: (value) => {
+    addLanguage(value);
+    languageInput.value = '';
+  },
+});
+
+languageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && languageInput.value.trim()) {
+    e.preventDefault();
+    e.stopPropagation();
+    addLanguage(languageInput.value);
+    languageInput.value = '';
+  } else if (e.key === 'Backspace' && !languageInput.value && state.languages.length) {
+    state.languages.pop();
+    renderLanguageChips();
+    saveDraft();
+  }
+});
+
+languageField.addEventListener('click', (e) => {
+  if (e.target === languageField || e.target === languageChipsEl) languageInput.focus();
+});
+
+languageChipsEl.addEventListener('change', (e) => {
+  const select = e.target.closest('.chip-level');
+  if (!select) return;
+  state.languages[Number(select.dataset.i)].level = select.value;
+  saveDraft();
+});
+
+languageChipsEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.chip-x');
+  if (!btn) return;
+  state.languages.splice(Number(btn.dataset.i), 1);
+  renderLanguageChips();
+  languageInput.focus();
+  saveDraft();
+});
+
+function serializeLanguages() {
+  return state.languages.map((l) => `${l.name} (${l.level})`).join(', ');
+}
+
+/* ------------------------------------------------------------ Assignments (structured, up to 3) */
+
+const assignmentsList = $('#assignmentsList');
+const addAssignmentBtn = $('#addAssignment');
+
+const ASSIGNMENT_FIELDS = [
+  ['title', 'Title of project', 'e.g. Biosafety capacity building programme', 'full'],
+  ['client', 'Client / Organization', 'e.g. UNODA, EU CBRN CoE', ''],
+  ['country', 'Country', '', ''],
+  ['duration', 'Duration', 'e.g. Mar 2022 – Jan 2023', ''],
+  ['role', 'Your role', 'e.g. Lead consultant', ''],
+];
+
+function renderAssignments() {
+  assignmentsList.innerHTML = state.assignments
+    .map(
+      (a, i) => `
+      <div class="assignment-card">
+        <div class="assignment-head">
+          <span class="assignment-num">Assignment ${i + 1}${i > 0 ? ' · optional' : ''}</span>
+          ${state.assignments.length > 1
+            ? `<button type="button" class="assignment-remove" data-remove="${i}">Remove</button>`
+            : ''}
+        </div>
+        <div class="assignment-grid">
+          ${ASSIGNMENT_FIELDS.map(
+            ([key, label, placeholder, span]) => `
+            <div${span === 'full' ? ' class="full"' : ''}>
+              <label class="sub-label" for="a-${key}-${i}">${label}</label>
+              <input class="text-input text-input-sm" type="text" id="a-${key}-${i}"
+                data-i="${i}" data-k="${key}" value="${escapeHtml(a[key])}"
+                ${placeholder ? `placeholder="${escapeHtml(placeholder)}"` : ''} />
+            </div>`
+          ).join('')}
+          <div class="full">
+            <label class="sub-label" for="a-description-${i}">Short description</label>
+            <textarea class="text-input text-input-sm" id="a-description-${i}" rows="3"
+              data-i="${i}" data-k="description">${escapeHtml(a.description)}</textarea>
+          </div>
+        </div>
+      </div>`
+    )
+    .join('');
+  addAssignmentBtn.hidden = state.assignments.length >= MAX_ASSIGNMENTS;
+}
+
+assignmentsList.addEventListener('input', (e) => {
+  const { i, k } = e.target.dataset;
+  if (i == null || !k) return;
+  state.assignments[Number(i)][k] = e.target.value;
+  saveDraft();
+});
+
+assignmentsList.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-remove]');
+  if (!btn) return;
+  state.assignments.splice(Number(btn.dataset.remove), 1);
+  if (!state.assignments.length) state.assignments.push(emptyAssignment());
+  renderAssignments();
+  saveDraft();
+});
+
+addAssignmentBtn.addEventListener('click', () => {
+  if (state.assignments.length >= MAX_ASSIGNMENTS) return;
+  state.assignments.push(emptyAssignment());
+  renderAssignments();
+  const idx = state.assignments.length - 1;
+  const first = document.getElementById(`a-title-${idx}`);
+  if (first) first.focus();
+  saveDraft();
+});
+
+function filledAssignments() {
+  return state.assignments.filter((a) => Object.values(a).some((v) => v && v.trim()));
+}
+
+function serializeAssignments() {
+  return filledAssignments()
+    .map((a, i) => {
+      const meta = [a.client, a.country, a.duration, a.role].filter(Boolean).join(' · ');
+      return `${i + 1}. ${a.title || 'Untitled'}${meta ? ' — ' + meta : ''}${a.description ? '\n' + a.description : ''}`;
+    })
+    .join('\n\n');
+}
+
+renderAssignments();
 
 /* ------------------------------------------------------------ Validation */
 
@@ -200,13 +493,21 @@ const validators = {
   },
   6() {
     const errors = [];
-    if (!getValue('languages')) errors.push(['languages', 'Please list your working languages.']);
+    // Adopt any language still sitting in the input box
+    if (languageInput.value.trim()) {
+      addLanguage(languageInput.value);
+      languageInput.value = '';
+    }
+    if (!state.languages.length) errors.push(['languages', 'Please add at least one language.']);
     const words = wordCount(getValue('summary'));
     if (!words) errors.push(['summary', 'Please write a summary of your expertise.']);
     else if (words < CONFIG.MIN_SUMMARY_WORDS) {
       errors.push(['summary', `Please write at least ${CONFIG.MIN_SUMMARY_WORDS} words (currently ${words}).`]);
     }
-    if (!getValue('assignments')) errors.push(['assignments', 'Please describe up to three key assignments.']);
+    const first = state.assignments[0] || emptyAssignment();
+    if (!first.title.trim() || !first.description.trim()) {
+      errors.push(['assignments', 'Please provide at least the project title and a short description for Assignment 1.']);
+    }
     return errors;
   },
   7() {
@@ -289,14 +590,12 @@ function goToStep(next, { animate = true } = {}) {
   backBtn.textContent = 'Back';
   nextBtn.textContent = next === TOTAL_STEPS ? 'Submit application' : 'Continue';
 
-  // Progress
   const pct = next === 0 ? 0 : next >= 12 ? 100 : Math.round((next / TOTAL_STEPS) * 100);
   progressFill.style.width = `${pct}%`;
   stepIndicator.textContent = inForm ? `Step ${next} of ${TOTAL_STEPS}` : next >= 12 ? 'Submitted' : '';
 
   window.scrollTo({ top: 0, behavior: prefersReducedMotion.matches ? 'auto' : 'smooth' });
 
-  // Move focus to the step heading for screen readers
   const heading = $('.step-title, .success-title', target);
   if (heading) heading.focus({ preventScroll: true });
 
@@ -322,6 +621,16 @@ nextBtn.addEventListener('click', () => {
 
 form.addEventListener('submit', (e) => e.preventDefault());
 
+// Enter in a single-line input advances the step (textareas keep Enter for newlines;
+// comboboxes and the language input consume Enter themselves when relevant)
+form.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  if (e.target.matches('input:not([type="checkbox"]):not([type="radio"]):not([type="file"])')) {
+    e.preventDefault();
+    nextBtn.click();
+  }
+});
+
 /* ------------------------------------------------------------ Conditional fields */
 
 function syncLegalStatusUI() {
@@ -338,13 +647,11 @@ form.addEventListener('change', (e) => {
   if (name === 'legalStatus') syncLegalStatusUI();
 
   if (name === 'expertise') {
-    const otherOn = getChecks('expertise').includes('Other (specify)');
-    $('#expertiseOtherField').hidden = !otherOn;
+    $('#expertiseOtherField').hidden = !getChecks('expertise').includes('Other (specify)');
   }
 
   if (name === 'geography') {
-    const otherOn = getChecks('geography').includes('Other (specify)');
-    $('#geographyOtherField').hidden = !otherOn;
+    $('#geographyOtherField').hidden = !getChecks('geography').includes('Other (specify)');
   }
 
   if (name === 'previousWork') {
@@ -364,6 +671,24 @@ summaryEl.addEventListener('input', () => {
   summaryCounter.textContent = `${words} / ${CONFIG.MIN_SUMMARY_WORDS} words`;
   summaryCounter.classList.toggle('ok', words >= CONFIG.MIN_SUMMARY_WORDS);
 });
+
+/* ------------------------------------------------------------ Rate helper */
+
+const dailyRateEl = $('#dailyRate');
+const hourlyRateEl = $('#hourlyRate');
+const rateHint = $('#rateHint');
+
+function updateRateHint() {
+  const daily = Number(dailyRateEl.value);
+  if (daily > 0) {
+    rateHint.textContent = `For reference: €${daily} / day ≈ €${Math.round(daily / 8)} / hour on an 8-hour day.`;
+    rateHint.hidden = false;
+  } else {
+    rateHint.hidden = true;
+  }
+}
+
+dailyRateEl.addEventListener('input', updateRateHint);
 
 /* ------------------------------------------------------------ File uploads */
 
@@ -440,7 +765,7 @@ $$('.dropzone').forEach((zone) => {
   });
 });
 
-/* ------------------------------------------------------------ Draft persistence (text fields only) */
+/* ------------------------------------------------------------ Draft persistence (no files) */
 
 function collectTextState() {
   return {
@@ -457,9 +782,9 @@ function collectTextState() {
     experience: getRadio('experience'),
     geography: getChecks('geography'),
     geographyOther: getValue('geographyOther'),
-    languages: getValue('languages'),
+    languages: serializeLanguages(),
     summary: getValue('summary'),
-    assignments: getValue('assignments'),
+    assignments: serializeAssignments(),
     availability: getChecks('availability'),
     dailyRate: getValue('dailyRate'),
     hourlyRate: getValue('hourlyRate'),
@@ -475,7 +800,14 @@ function saveDraft() {
   clearTimeout(draftTimer);
   draftTimer = setTimeout(() => {
     try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(collectTextState()));
+      localStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({
+          ...collectTextState(),
+          languagesList: state.languages,
+          assignmentsList: state.assignments,
+        })
+      );
     } catch (_) { /* storage unavailable — ignore */ }
   }, 400);
 }
@@ -492,18 +824,18 @@ function restoreDraft() {
   if (!draft) return;
 
   const setRadio = (name, value) => {
-    const el = form.querySelector(`input[name="${name}"][value="${CSS.escape(value)}"]`);
+    if (!value) return;
+    const el = [...form.querySelectorAll(`input[name="${name}"]`)].find((i) => i.value === value);
     if (el) el.checked = true;
   };
-  const setChecks = (name, values = []) =>
-    values.forEach((value) => setRadio(name, value));
+  const setChecks = (name, values = []) => values.forEach((value) => setRadio(name, value));
   const setText = (id, value) => {
     const el = document.getElementById(id);
     if (el && value != null) el.value = value;
   };
 
-  setRadio('role', draft.role || '');
-  setRadio('legalStatus', draft.legalStatus || '');
+  setRadio('role', draft.role);
+  setRadio('legalStatus', draft.legalStatus);
   setText('orgName', draft.orgName);
   setText('fullName', draft.fullName);
   setText('nationality', draft.nationality);
@@ -512,26 +844,33 @@ function restoreDraft() {
   setText('phone', draft.phone);
   setChecks('expertise', draft.expertise);
   setText('expertiseOther', draft.expertiseOther);
-  setRadio('experience', draft.experience || '');
+  setRadio('experience', draft.experience);
   setChecks('geography', draft.geography);
   setText('geographyOther', draft.geographyOther);
-  setText('languages', draft.languages);
   setText('summary', draft.summary);
-  setText('assignments', draft.assignments);
   setChecks('availability', draft.availability);
   setText('dailyRate', draft.dailyRate);
   setText('hourlyRate', draft.hourlyRate);
-  setRadio('previousWork', draft.previousWork || '');
+  setRadio('previousWork', draft.previousWork);
   setText('referenceNumber', draft.referenceNumber);
   if (draft.conflictAgree) form.querySelector('input[name="conflictAgree"]').checked = true;
   if (draft.dataAgree) form.querySelector('input[name="dataAgree"]').checked = true;
 
-  // Sync conditional UI
+  if (Array.isArray(draft.languagesList)) {
+    state.languages = draft.languagesList.filter((l) => l && l.name);
+    renderLanguageChips();
+  }
+  if (Array.isArray(draft.assignmentsList) && draft.assignmentsList.length) {
+    state.assignments = draft.assignmentsList.slice(0, MAX_ASSIGNMENTS).map((a) => ({ ...emptyAssignment(), ...a }));
+    renderAssignments();
+  }
+
   syncLegalStatusUI();
   $('#expertiseOtherField').hidden = !(draft.expertise || []).includes('Other (specify)');
   $('#geographyOtherField').hidden = !(draft.geography || []).includes('Other (specify)');
   $('#referenceField').hidden = draft.previousWork !== 'Yes';
   summaryEl.dispatchEvent(new Event('input'));
+  updateRateHint();
 }
 
 restoreDraft();
@@ -590,7 +929,7 @@ function renderReview() {
       rows: [
         ['Languages', data.languages],
         ['Summary', `${wordCount(data.summary)} words`],
-        ['Key assignments', truncate(data.assignments, 220)],
+        ['Key assignments', filledAssignments().map((a) => a.title || 'Untitled').join('\n') || '—'],
       ],
     },
     {
@@ -636,26 +975,13 @@ function renderReview() {
   );
 }
 
-function truncate(text, max) {
-  const t = (text || '').trim();
-  return t.length > max ? `${t.slice(0, max)}…` : t;
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
 /* ------------------------------------------------------------ Submission */
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
-      const result = reader.result; // data:<mime>;base64,<data>
-      resolve(String(result).split(',')[1] || '');
+      resolve(String(reader.result).split(',')[1] || '');
     };
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);

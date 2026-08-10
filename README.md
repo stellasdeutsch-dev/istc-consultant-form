@@ -10,8 +10,9 @@ Expressions of Interest for the ISTC Consultant Database.
 | File | Purpose |
 | --- | --- |
 | `index.html` | The multi-step application form (11 steps + review + success) |
-| `styles.css` | Apple-style design system: system font, translucent header, dark mode, reduced-motion support |
-| `app.js` | Step navigation, validation, file uploads, draft autosave, submission |
+| `styles.css` | Apple-style design system: system font, translucent header, light/dark themes, reduced-motion support |
+| `app.js` | Step navigation, validation, smart inputs, file uploads, draft autosave, submission |
+| `data.js` | Suggestion lists for autocomplete (countries, nationalities, languages) |
 | `apps-script/Code.gs` | Google Apps Script backend that stores submissions in a Google Sheet + Drive |
 
 ## ⚠️ Connect the backend (required before accepting submissions)
@@ -49,6 +50,12 @@ are not open yet" message on the final submit.
 - **Branching**: firm/organization applicants get an Organization Name field;
   "Other" options reveal text fields; "Yes" to previous ISTC work reveals the
   reference-number field.
+- **Smart inputs**: autocomplete pickers for nationality and country of
+  residence; a token-based Languages field (type-ahead suggestions, per-language
+  proficiency: Basic / Working / Fluent / Native); structured Key Assignments
+  builder (up to 3 cards with title, client, country, duration, role,
+  description); a live daily→hourly rate equivalence hint.
+- **Light theme by default** with a dark-mode toggle in the header (persisted).
 - **File uploads** with drag & drop, 10 MB limit (CV required; certifications
   and publications optional).
 - **500-word minimum** live word counter on the expertise summary.
