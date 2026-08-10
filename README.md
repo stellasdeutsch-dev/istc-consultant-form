@@ -35,8 +35,22 @@ checkbox list. Applicants can click any country, add a whole region in one tap,
 or search by name — selections appear as removable chips under the map.
 
 `map-data.js` is generated from [Natural Earth](https://www.naturalearthdata.com/)
-110m admin-0 data (public domain), projected with Robinson and simplified with
-Douglas-Peucker to ~85 KB (~25 KB gzipped). To regenerate:
+admin-0 data (public domain), projected with Robinson and simplified with
+Douglas-Peucker to ~119 KB (~44 KB gzipped).
+
+**Boundaries.** The build uses Natural Earth's **Ukraine point-of-view**
+edition (`ne_10m_admin_0_countries_ukr`). Natural Earth's default file draws
+*de facto* control, which places Crimea inside Russia; the point-of-view
+edition shows Crimea as Ukrainian territory, consistent with UN General
+Assembly Resolution 68/262. Point-of-view editions are only published at the
+10m scale, which is why the source is 10m rather than 110m — the extra detail
+costs nothing in output, since `TOLERANCE` governs the final vertex density.
+
+To regenerate:
+
+```bash
+curl -sLo /tmp/ne10m_ukr.geojson https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_countries_ukr.geojson
+```
 
 ```bash
 node scripts/build-map.js
