@@ -44,7 +44,6 @@
   /* ---------------------------------------------------------- Scroll reveal */
 
   const revealTargets = [
-    ...document.querySelectorAll('.bubbles-copy'),
     ...document.querySelectorAll('.intro-card'),
     ...document.querySelectorAll('.work-dark'),
     ...document.querySelectorAll('.work-card'),

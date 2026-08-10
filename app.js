@@ -551,10 +551,11 @@ const validators = {
     }
     return errors;
   },
-  6() {
+  6(opts = {}) {
     const errors = [];
-    // Adopt any language still sitting in the input box
-    if (languageInput.value.trim()) {
+    // Adopt any language still sitting in the input box. Skipped on silent
+    // completeness checks so the stepper never mutates what it is measuring.
+    if (!opts.silent && languageInput.value.trim()) {
       addLanguage(languageInput.value);
       languageInput.value = '';
     }
@@ -605,6 +606,13 @@ const validators = {
   },
 };
 
+/* True when a step's own answers are currently valid — used by the step
+   navigator to show ticks. Never mutates state or surfaces error messages. */
+function isStepComplete(step) {
+  const fn = validators[step];
+  return fn ? fn({ silent: true }).length === 0 : false;
+}
+
 function validateStep(step) {
   const stepEl = steps.get(String(step));
   clearErrors(stepEl);
@@ -618,6 +626,68 @@ function validateStep(step) {
   }
   return errors.length === 0;
 }
+
+/* ------------------------------------------------------------ Step navigator */
+
+const STEP_LABELS = [
+  'Type', 'Details', 'Documents', 'Expertise', 'Profile', 'Background',
+  'Availability', 'Rates', 'History', 'Declarations', 'Review',
+];
+
+const stepper = $('#stepper');
+const stepperTrack = $('#stepperTrack');
+
+const TICK_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13l5 5L20 6"/></svg>';
+
+stepperTrack.innerHTML = STEP_LABELS.map(
+  (label, i) => `
+  <button type="button" class="step-dot" data-step-to="${i + 1}">
+    <span class="step-dot-num">${i + 1}</span>
+    <span class="step-dot-label">${label}</span>
+  </button>`
+).join('');
+
+const stepDots = $$('.step-dot', stepperTrack);
+
+function updateStepper() {
+  const current = state.step;
+  stepDots.forEach((dot, i) => {
+    const n = i + 1;
+    const done = n !== TOTAL_STEPS && isStepComplete(n);
+    dot.classList.toggle('is-current', n === current);
+    dot.classList.toggle('is-done', done && n !== current);
+    dot.setAttribute('aria-current', n === current ? 'step' : 'false');
+    dot.setAttribute(
+      'aria-label',
+      `Step ${n}: ${STEP_LABELS[i]}${done ? ' — complete' : ''}`
+    );
+    const numEl = $('.step-dot-num', dot);
+    numEl.innerHTML = done && n !== current ? TICK_SVG : String(n);
+  });
+
+  const active = stepDots[current - 1];
+  if (active) {
+    const track = stepperTrack;
+    const dotLeft = active.offsetLeft;
+    const dotRight = dotLeft + active.offsetWidth;
+    if (dotLeft < track.scrollLeft + 12) {
+      track.scrollTo({ left: Math.max(0, dotLeft - 24), behavior: prefersReducedMotion.matches ? 'auto' : 'smooth' });
+    } else if (dotRight > track.scrollLeft + track.clientWidth - 12) {
+      track.scrollTo({ left: dotRight - track.clientWidth + 24, behavior: prefersReducedMotion.matches ? 'auto' : 'smooth' });
+    }
+  }
+}
+
+stepperTrack.addEventListener('click', (e) => {
+  const dot = e.target.closest('[data-step-to]');
+  if (!dot) return;
+  const target = Number(dot.dataset.stepTo);
+  if (target === state.step) return;
+  // Free navigation: jumping never loses answers, and Submit re-checks
+  // every step, so an unfinished step can't slip through.
+  goToStep(target);
+});
 
 /* ------------------------------------------------------------ Navigation */
 
@@ -647,8 +717,10 @@ function goToStep(next, { animate = true } = {}) {
 
   const inForm = next >= 1 && next <= TOTAL_STEPS;
   stepNav.hidden = !inForm;
+  stepper.hidden = !inForm;
   backBtn.textContent = 'Back';
   nextBtn.textContent = next === TOTAL_STEPS ? 'Submit application' : 'Continue';
+  if (inForm) updateStepper();
 
   const pct = next === 0 ? 0 : next >= 12 ? 100 : Math.round((next / TOTAL_STEPS) * 100);
   progressFill.style.width = `${pct}%`;
@@ -889,6 +961,7 @@ function collectTextState() {
 
 let draftTimer = null;
 function saveDraft() {
+  if (state.step >= 1 && state.step <= TOTAL_STEPS) updateStepper();
   clearTimeout(draftTimer);
   draftTimer = setTimeout(() => {
     try {
@@ -977,6 +1050,14 @@ restoreDraft();
 
 /* ------------------------------------------------------------ Review */
 
+/* With free step navigation, a step can be skipped entirely — collect them
+   so Review can flag them and Submit can refuse. */
+function incompleteSteps() {
+  const out = [];
+  for (let n = 1; n < TOTAL_STEPS; n++) if (!isStepComplete(n)) out.push(n);
+  return out;
+}
+
 function renderReview() {
   const data = collectTextState();
   const fileLabel = (key) =>
@@ -1054,7 +1135,18 @@ function renderReview() {
     },
   ];
 
-  $('#reviewContent').innerHTML = groups
+  const missing = incompleteSteps();
+  const banner = missing.length
+    ? `<div class="review-warn">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9"/></svg>
+         <div>
+           <strong>${missing.length} ${missing.length === 1 ? 'step still needs' : 'steps still need'} an answer</strong>
+           <p>${missing.map((n) => `<button type="button" class="review-warn-link" data-goto="${n}">${n}. ${escapeHtml(STEP_LABELS[n - 1])}</button>`).join('')}</p>
+         </div>
+       </div>`
+    : '';
+
+  $('#reviewContent').innerHTML = banner + groups
     .map(
       (group) => `
       <div class="review-group">
@@ -1075,7 +1167,7 @@ function renderReview() {
     )
     .join('');
 
-  $$('#reviewContent .review-edit').forEach((btn) =>
+  $$('#reviewContent [data-goto]').forEach((btn) =>
     btn.addEventListener('click', () => goToStep(Number(btn.dataset.goto)))
   );
 }
@@ -1113,6 +1205,14 @@ async function buildPayload() {
 async function submitApplication() {
   const errEl = $('#submitError');
   errEl.hidden = true;
+
+  // Steps are freely navigable, so re-check them all before sending.
+  const missing = incompleteSteps();
+  if (missing.length) {
+    goToStep(missing[0]);
+    validateStep(missing[0]);
+    return;
+  }
 
   if (!CONFIG.SUBMIT_URL) {
     errEl.textContent =
