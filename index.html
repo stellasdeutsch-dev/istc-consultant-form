@@ -9,7 +9,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a6bef'/%3E%3Ctext x='32' y='42' font-family='-apple-system,Helvetica,Arial' font-size='26' font-weight='700' fill='white' text-anchor='middle'%3EI%3C/text%3E%3C/svg%3E" />
   <!-- ?v= is a cache-busting token: bump it on every deploy so returning
        visitors never run a stale mix of old CSS with new JS. -->
-  <link rel="stylesheet" href="styles.css?v=2026-08-10a" />
+  <link rel="stylesheet" href="styles.css?v=2026-08-10b" />
 </head>
 <body>
 
@@ -726,10 +726,12 @@
     </p>
   </footer>
 
-  <script src="data.js?v=2026-08-10a"></script>
-  <script src="map-data.js?v=2026-08-10a"></script>
-  <script src="map.js?v=2026-08-10a"></script>
-  <script src="app.js?v=2026-08-10a"></script>
-  <script src="landing.js?v=2026-08-10a"></script>
+  <script src="data.js?v=2026-08-10b"></script>
+  <script src="map-data.js?v=2026-08-10b"></script>
+  <script src="map.js?v=2026-08-10b"></script>
+  <script src="app.js?v=2026-08-10b"></script>
+  <!-- after app.js: it decorates the option cards app.js injects -->
+  <script src="icons.js?v=2026-08-10b"></script>
+  <script src="landing.js?v=2026-08-10b"></script>
 </body>
 </html>

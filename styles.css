@@ -994,6 +994,84 @@ legend.field-label { margin-bottom: 0.75rem; }
 
 .word-counter.ok { color: var(--success); font-weight: 600; }
 
+/* ============ Icons (solid / duotone set, see icons.js) ============ */
+
+.ico { width: 1.25rem; height: 1.25rem; display: block; flex: none; }
+
+/* Leading glyph inside a text field */
+.input-wrap { position: relative; }
+
+.input-ico {
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1.125rem;
+  height: 1.125rem;
+  color: var(--text-secondary);
+  pointer-events: none;
+  transition: color 180ms var(--ease-out);
+  z-index: 1;
+}
+
+.input-wrap:focus-within .input-ico,
+.chip-field:focus-within .input-ico,
+.picker-search:focus-within .input-ico { color: var(--accent); }
+
+.text-input.has-ico { padding-left: 2.875rem; }
+
+/* The chip field and country search position their own glyph */
+.chip-field.has-ico { padding-left: 2.75rem; position: relative; }
+.input-ico-static { top: 1.25rem; transform: none; }
+.picker-search input { padding-left: 2.875rem; }
+
+/* Badge on an option card */
+.option-ico {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9px;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  transition: background 180ms var(--ease-out), color 180ms var(--ease-out);
+}
+
+.option-ico .ico { width: 1.125rem; height: 1.125rem; }
+
+.option:hover .option-ico { color: var(--accent); }
+
+.option:has(input:checked) .option-ico {
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(10, 107, 239, 0.3);
+}
+
+/* Badge beside a step heading */
+.step-ico {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 14px;
+  background: var(--accent-tint);
+  color: var(--accent);
+  margin-bottom: 0.875rem;
+}
+
+.step-ico .ico { width: 1.5rem; height: 1.5rem; }
+
+/* Small glyph inline in a field label */
+.label-ico {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  color: var(--accent);
+  vertical-align: -0.16em;
+  margin-right: 0.4375rem;
+}
+
 /* ============ Option cards ============ */
 
 .option-group { display: flex; flex-direction: column; gap: 0.625rem; }
