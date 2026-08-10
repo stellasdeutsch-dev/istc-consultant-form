@@ -34,21 +34,8 @@ const EXPERTISE_OPTIONS = [
   'Other (specify)',
 ];
 
-const GEOGRAPHY_OPTIONS = [
-  'Central Asia',
-  'Eastern Europe',
-  'South Caucasus',
-  'Middle East',
-  'Africa',
-  'Southeast Asia',
-  'South America',
-  'Central America',
-  'Global / Multi-Regional',
-  'Other (specify)',
-];
-
 const TOTAL_STEPS = 11;
-const DRAFT_KEY = 'istc-eoi-draft-v3';
+const DRAFT_KEY = 'istc-eoi-draft-v4';
 const MAX_ASSIGNMENTS = 3;
 
 /* ------------------------------------------------------------ State */
@@ -75,7 +62,6 @@ const nextBtn = $('#nextBtn');
 const startBtn = $('#startBtn');
 const progressFill = $('#progressFill');
 const stepIndicator = $('#stepIndicator');
-const siteHeader = $('#siteHeader');
 const themeToggle = $('#themeToggle');
 const languageInput = $('#languageInput');
 const languageChipsEl = $('#languageChips');
@@ -128,6 +114,11 @@ function isFirm() {
   return getRadio('legalStatus') === 'Consulting Firm / Organization';
 }
 
+function truncate(text, max) {
+  const t = (text || '').trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -152,7 +143,6 @@ function injectOptions(container, name, options) {
 }
 
 injectOptions($('[data-error-anchor="expertise"]'), 'expertise', EXPERTISE_OPTIONS);
-injectOptions($('[data-error-anchor="geography"]'), 'geography', GEOGRAPHY_OPTIONS);
 
 /* ------------------------------------------------------------ Errors */
 
@@ -183,7 +173,9 @@ function clearErrors(stepEl) {
 /* ------------------------------------------------------------ Autocomplete (combobox) */
 
 function attachAutocomplete(input, items, { onSelect } = {}) {
-  const anchor = input.closest('.field') || input.parentElement;
+  // Honour an explicit .combo-anchor (the country search sits inside a wider
+  // field and must drop its menu under the input, not the whole block).
+  const anchor = input.closest('.combo-anchor') || input.closest('.field') || input.parentElement;
   anchor.classList.add('combo-anchor');
 
   const menu = document.createElement('div');
@@ -355,7 +347,86 @@ function serializeLanguages() {
   return state.languages.map((l) => `${l.name} (${l.level})`).join(', ');
 }
 
-/* ------------------------------------------------------------ Assignments (structured, up to 3) */
+/* ------------------------------------------------------------ Geographic experience (map picker) */
+
+const regionChipsEl = $('#regionChips');
+const countryChipsEl = $('#countryChips');
+const countryCountEl = $('#countryCount');
+const clearCountriesBtn = $('#clearCountries');
+const countrySearch = $('#countrySearch');
+
+const picker = createWorldMap($('#pickerMap'), {
+  mode: 'picker',
+  onChange: () => {
+    renderPickerState();
+    saveDraft();
+  },
+});
+
+function renderPickerState() {
+  const { ids, names } = picker.getSelection();
+
+  countryCountEl.textContent = ids.length
+    ? `${ids.length} ${ids.length === 1 ? 'country' : 'countries'} selected`
+    : 'No countries selected yet';
+  clearCountriesBtn.hidden = !ids.length;
+
+  // Region chips reflect "every country in this region is on"
+  $$('.region-chip', regionChipsEl).forEach((chip) => {
+    const list = countriesInRegion(chip.dataset.region);
+    chip.classList.toggle('is-on', list.length > 0 && list.every((c) => picker.has(c.i)));
+  });
+
+  countryChipsEl.innerHTML = ids
+    .map((id) => COUNTRY_BY_ID.get(id))
+    .sort((a, b) => a.n.localeCompare(b.n))
+    .map(
+      (c) => `
+      <span class="country-chip">
+        ${escapeHtml(c.n)}
+        <button type="button" data-remove-country="${c.i}" aria-label="Remove ${escapeHtml(c.n)}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </span>`
+    )
+    .join('');
+
+  if (ids.length) {
+    const errEl = form.querySelector('[data-error-for="geography"]');
+    if (errEl) errEl.hidden = true;
+  }
+  void names;
+}
+
+regionChipsEl.innerHTML = ISTC_REGIONS.map(
+  (r) => `<button type="button" class="region-chip" data-region="${escapeHtml(r)}">${escapeHtml(r)}</button>`
+).join('');
+
+regionChipsEl.addEventListener('click', (e) => {
+  const chip = e.target.closest('.region-chip');
+  if (chip) picker.toggleRegion(chip.dataset.region);
+});
+
+countryChipsEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-remove-country]');
+  if (btn) picker.remove([btn.dataset.removeCountry]);
+});
+
+clearCountriesBtn.addEventListener('click', () => picker.clear());
+
+attachAutocomplete(countrySearch, WORLD_MAP.countries.map((c) => c.n), {
+  onSelect: (name) => {
+    const match = WORLD_MAP.countries.find((c) => c.n === name);
+    if (!match) return;
+    picker.add([match.i]);
+    picker.flash(match.i);
+    countrySearch.value = '';
+  },
+});
+
+renderPickerState();
+
+/* ------------------------------------------------------------ Assignments (free text, up to 3) */
 
 const assignmentsList = $('#assignmentsList');
 const addAssignmentBtn = $('#addAssignment');
@@ -475,10 +546,8 @@ const validators = {
   5() {
     const errors = [];
     if (!getRadio('experience')) errors.push(['experience', 'Please select your years of experience.']);
-    const geo = getChecks('geography');
-    if (!geo.length) errors.push(['geography', 'Please select at least one region.']);
-    if (geo.includes('Other (specify)') && !getValue('geographyOther')) {
-      errors.push(['geographyOther', 'Please specify the other region.']);
+    if (!picker.size()) {
+      errors.push(['geography', 'Please select at least one country — click the map, or add a whole region.']);
     }
     return errors;
   },
@@ -594,7 +663,7 @@ function goToStep(next, { animate = true } = {}) {
   if (next === TOTAL_STEPS) renderReview();
 }
 
-[startBtn, $('#startBtn2')].filter(Boolean).forEach((btn) =>
+[startBtn, $('#startBtn2'), $('#startBtn3')].filter(Boolean).forEach((btn) =>
   btn.addEventListener('click', () => goToStep(1))
 );
 
@@ -641,10 +710,6 @@ form.addEventListener('change', (e) => {
 
   if (name === 'expertise') {
     $('#expertiseOtherField').hidden = !getChecks('expertise').includes('Other (specify)');
-  }
-
-  if (name === 'geography') {
-    $('#geographyOtherField').hidden = !getChecks('geography').includes('Other (specify)');
   }
 
   if (name === 'previousWork') {
@@ -793,6 +858,7 @@ $$('.dropzone').forEach((zone) => {
 /* ------------------------------------------------------------ Draft persistence (no files) */
 
 function collectTextState() {
+  const geo = picker.getSelection();
   return {
     role: getRadio('role'),
     legalStatus: getRadio('legalStatus'),
@@ -805,8 +871,9 @@ function collectTextState() {
     expertise: getChecks('expertise'),
     expertiseOther: getValue('expertiseOther'),
     experience: getRadio('experience'),
-    geography: getChecks('geography'),
-    geographyOther: getValue('geographyOther'),
+    geography: geo.regions,
+    countries: geo.names,
+    countryCodes: geo.ids,
     languages: serializeLanguages(),
     summary: getValue('summary'),
     assignments: serializeAssignments(),
@@ -870,8 +937,6 @@ function restoreDraft() {
   setChecks('expertise', draft.expertise);
   setText('expertiseOther', draft.expertiseOther);
   setRadio('experience', draft.experience);
-  setChecks('geography', draft.geography);
-  setText('geographyOther', draft.geographyOther);
   setText('summary', draft.summary);
   setChecks('availability', draft.availability);
   setText('dailyRate', draft.dailyRate);
@@ -884,6 +949,10 @@ function restoreDraft() {
   if (Array.isArray(draft.languagesList)) {
     state.languages = draft.languagesList.filter((l) => l && l.name);
     renderLanguageChips();
+  }
+  if (Array.isArray(draft.countryCodes)) {
+    picker.setSelection(draft.countryCodes);
+    renderPickerState();
   }
   if (Array.isArray(draft.assignmentsList) && draft.assignmentsList.length) {
     state.assignments = draft.assignmentsList
@@ -899,7 +968,6 @@ function restoreDraft() {
 
   syncLegalStatusUI();
   $('#expertiseOtherField').hidden = !(draft.expertise || []).includes('Other (specify)');
-  $('#geographyOtherField').hidden = !(draft.geography || []).includes('Other (specify)');
   $('#referenceField').hidden = draft.previousWork !== 'Yes';
   summaryEl.dispatchEvent(new Event('input'));
   updateRateHint();
@@ -952,8 +1020,10 @@ function renderReview() {
       title: 'Technical Profile', step: 5,
       rows: [
         ['Experience', data.experience],
-        ['Regions', data.geography.filter((v) => v !== 'Other (specify)').join('\n') || '—'],
-        ...(data.geographyOther ? [['Other region', data.geographyOther]] : []),
+        ['Regions', data.geography.join('\n') || '—'],
+        ['Countries', data.countries.length
+          ? `${data.countries.length} selected — ${truncate(data.countries.join(', '), 160)}`
+          : '—'],
       ],
     },
     {
@@ -1080,14 +1150,4 @@ async function submitApplication() {
   }
 }
 
-/* ------------------------------------------------------------ Header hairline on scroll */
-
-let scrollTicking = false;
-window.addEventListener('scroll', () => {
-  if (scrollTicking) return;
-  scrollTicking = true;
-  requestAnimationFrame(() => {
-    siteHeader.classList.toggle('scrolled', window.scrollY > 8);
-    scrollTicking = false;
-  });
-});
+/* The sticky-header hairline lives in landing.js, which owns scroll behaviour. */

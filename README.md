@@ -9,11 +9,31 @@ Expressions of Interest for the ISTC Consultant Database.
 
 | File | Purpose |
 | --- | --- |
-| `index.html` | The multi-step application form (11 steps + review + success) |
-| `styles.css` | Apple-style design system: system font, translucent header, light/dark themes, reduced-motion support |
+| `index.html` | Landing page + the multi-step application form (11 steps + review + success) |
+| `styles.css` | Design system: two-tone display type, glossy gradient CTAs, navy accent cards, light/dark themes, reduced-motion support |
 | `app.js` | Step navigation, validation, smart inputs, file uploads, draft autosave, submission |
+| `map.js` | Interactive world map component (showcase tour + country picker) |
+| `map-data.js` | **Generated** — 175 country SVG paths, Robinson projection. Rebuild with `scripts/build-map.js`, don't hand-edit |
+| `landing.js` | Landing page behaviour: map tour, scroll reveals, header hairline |
 | `data.js` | Suggestion lists for autocomplete (countries, nationalities, languages) |
 | `apps-script/Code.gs` | Google Apps Script backend that stores submissions in a Google Sheet + Drive |
+
+## The country map
+
+Geographic experience is captured with an interactive world map instead of a
+checkbox list. Applicants can click any country, add a whole region in one tap,
+or search by name — selections appear as removable chips under the map.
+
+`map-data.js` is generated from [Natural Earth](https://www.naturalearthdata.com/)
+110m admin-0 data (public domain), projected with Robinson and simplified with
+Douglas-Peucker to ~85 KB (~25 KB gzipped). To regenerate:
+
+```bash
+node scripts/build-map.js
+```
+
+Each country carries a UN-subregion-derived region tag, which drives the
+region quick-select chips and the regions recorded on submission.
 
 ## ⚠️ Connect the backend (required before accepting submissions)
 
