@@ -178,7 +178,9 @@ function icon(name, cls = '') {
    Wiring
    ============================================================ */
 
-(function applyIcons() {
+// ICONS and icon() are defined synchronously above so other scripts can use
+// them while rendering; the DOM wiring waits until the markup exists.
+document.addEventListener('DOMContentLoaded', function applyIcons() {
   const $$$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
   /* --- leading glyphs inside text inputs --- */
@@ -299,4 +301,4 @@ function icon(name, cls = '') {
     label.insertAdjacentHTML('afterbegin', icon(name, 'label-ico'));
     label.dataset.iconed = '1';
   });
-})();
+});

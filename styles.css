@@ -876,6 +876,70 @@ body {
 
 .reveal.in { opacity: 1; transform: none; }
 
+/* ============================================================
+   Application palette
+
+   The landing page is marketing and carries the brighter identity
+   blue. The form itself is an official submission, so it runs on a
+   restrained navy: same structure, lower voltage. Scoping the tokens
+   to these ancestors re-colours every descendant — buttons, options,
+   the map, the stepper — without duplicating component rules.
+   ============================================================ */
+
+#eoiForm,
+.stepper,
+.step-success {
+  --accent: #204068;
+  --accent-2: #2f5b8f;
+  --accent-hover: #1a3557;
+  --accent-tint: rgba(32, 64, 104, 0.07);
+  --accent-tint-2: rgba(32, 64, 104, 0.13);
+  --focus-ring: 0 0 0 4px rgba(32, 64, 104, 0.25);
+  --glow: 0 4px 14px rgba(32, 64, 104, 0.24);
+  --glow-strong: 0 8px 22px rgba(32, 64, 104, 0.3);
+  --success: #2c6e4b;
+  --map-land: #dbe1ea;
+}
+
+:root[data-theme="dark"] #eoiForm,
+:root[data-theme="dark"] .stepper,
+:root[data-theme="dark"] .step-success {
+  --accent: #7ea6d4;
+  --accent-2: #9dbde3;
+  --accent-hover: #93b5df;
+  --accent-tint: rgba(126, 166, 212, 0.14);
+  --accent-tint-2: rgba(126, 166, 212, 0.22);
+  --focus-ring: 0 0 0 4px rgba(126, 166, 212, 0.3);
+  --glow: 0 4px 14px rgba(126, 166, 212, 0.22);
+  --glow-strong: 0 8px 22px rgba(126, 166, 212, 0.28);
+  --success: #4bb47a;
+  --map-land: #2b3a55;
+}
+
+/* Quieter buttons in the form: flat navy, sentence case, no showroom gloss */
+#eoiForm .btn-glow {
+  background: var(--accent);
+  text-transform: none;
+  letter-spacing: 0.005em;
+  font-weight: 600;
+  box-shadow: var(--glow);
+}
+
+#eoiForm .btn-glow:hover {
+  background: var(--accent-hover);
+  box-shadow: var(--glow-strong);
+  transform: none;
+}
+
+#eoiForm .btn-glow:active { transform: scale(0.98); }
+
+#eoiForm .segment:has(input:checked) span,
+#eoiForm .option:has(input:checked) .option-ico,
+.stepper .step-dot.is-current .step-dot-num {
+  background: var(--accent);
+  box-shadow: none;
+}
+
 /* ============ Form steps ============ */
 
 .step { padding-top: clamp(2rem, 5vh, 3.5rem); }
@@ -1565,10 +1629,43 @@ legend.field-label { margin-bottom: 0.75rem; }
 .assignment-remove:hover { background: var(--danger-tint); }
 .assignment-remove:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
+.assignment-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.875rem 1rem;
+}
+
+@media (max-width: 620px) {
+  .assignment-grid { grid-template-columns: 1fr; }
+}
+
+.a-span { grid-column: 1 / -1; }
+
+.sub-label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.375rem;
+}
+
+.text-input-sm {
+  font-size: 0.9375rem;
+  padding: 0.625rem 0.875rem;
+  background: var(--surface);
+}
+
+.text-input-sm.has-ico { padding-left: 2.5rem; }
+.a-field .input-ico { left: 0.8125rem; width: 1rem; height: 1rem; }
+
+/* Native month controls: keep the picker glyph from colliding with our own */
+.a-field input[type="month"] { padding-right: 0.5rem; }
+.a-field input[type="month"]::-webkit-calendar-picker-indicator { opacity: 0.45; cursor: pointer; }
+
 .assignment-text {
   font-size: 0.9375rem;
   background: var(--surface);
-  min-height: 6.5rem;
+  min-height: 5.5rem;
   resize: vertical;
   line-height: 1.55;
 }

@@ -9,7 +9,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a6bef'/%3E%3Ctext x='32' y='42' font-family='-apple-system,Helvetica,Arial' font-size='26' font-weight='700' fill='white' text-anchor='middle'%3EI%3C/text%3E%3C/svg%3E" />
   <!-- ?v= is a cache-busting token: bump it on every deploy so returning
        visitors never run a stale mix of old CSS with new JS. -->
-  <link rel="stylesheet" href="styles.css?v=2026-08-10c" />
+  <link rel="stylesheet" href="styles.css?v=2026-08-10d" />
 </head>
 <body>
 
@@ -527,8 +527,7 @@
             <span class="field-label">Key Assignments / Achievements <span class="req" aria-hidden="true">*</span></span>
             <p class="field-hint">
               Add up to three (3) assignments or achievements from the last 5–7 years that best
-              demonstrate your expertise. For each one, include the title of the project, client /
-              organization, country, duration, your role, and a short description. The first one is required.
+              demonstrate your expertise. The first one is required.
             </p>
             <div id="assignmentsList" data-error-anchor="assignments"></div>
             <button type="button" class="btn-add" id="addAssignment">
@@ -726,12 +725,13 @@
     </p>
   </footer>
 
-  <script src="data.js?v=2026-08-10c"></script>
-  <script src="map-data.js?v=2026-08-10c"></script>
-  <script src="map.js?v=2026-08-10c"></script>
-  <script src="app.js?v=2026-08-10c"></script>
-  <!-- after app.js: it decorates the option cards app.js injects -->
-  <script src="icons.js?v=2026-08-10c"></script>
-  <script src="landing.js?v=2026-08-10c"></script>
+  <script src="data.js?v=2026-08-10d"></script>
+  <script src="map-data.js?v=2026-08-10d"></script>
+  <script src="map.js?v=2026-08-10d"></script>
+  <!-- before app.js so icon() is available while it renders; the DOM
+       wiring inside waits for DOMContentLoaded -->
+  <script src="icons.js?v=2026-08-10d"></script>
+  <script src="app.js?v=2026-08-10d"></script>
+  <script src="landing.js?v=2026-08-10d"></script>
 </body>
 </html>

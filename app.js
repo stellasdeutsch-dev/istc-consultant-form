@@ -35,16 +35,20 @@ const EXPERTISE_OPTIONS = [
 ];
 
 const TOTAL_STEPS = 11;
-const DRAFT_KEY = 'istc-eoi-draft-v4';
+const DRAFT_KEY = 'istc-eoi-draft-v5';
 const MAX_ASSIGNMENTS = 3;
 
 /* ------------------------------------------------------------ State */
+
+function emptyAssignment() {
+  return { title: '', client: '', country: '', from: '', to: '', role: '', description: '' };
+}
 
 const state = {
   step: 0, // 0 = intro, 1..11 = form, 12 = success
   files: { cv: null, certifications: null, publications: null },
   languages: [], // [{ name, level }]
-  assignments: [''], // one free-text block per assignment, up to 3
+  assignments: [emptyAssignment()], // up to 3
 };
 
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -431,28 +435,78 @@ renderPickerState();
 const assignmentsList = $('#assignmentsList');
 const addAssignmentBtn = $('#addAssignment');
 
-const ASSIGNMENT_PLACEHOLDER =
-  'e.g. Biosafety capacity building programme — UNODA, Kazakhstan, Mar 2022 – Jan 2023, Lead consultant.\n'
-  + 'Designed and delivered national biosafety training for 120 laboratory specialists…';
+function textField(i, key, label, iconName, placeholder, opts = {}) {
+  const value = escapeHtml(state.assignments[i][key]);
+  const type = opts.type || 'text';
+  return `
+    <div class="a-field${opts.span ? ' a-span' : ''}${opts.combo ? ' combo-anchor' : ''}">
+      <label class="sub-label" for="a-${key}-${i}">${label}</label>
+      <div class="input-wrap">
+        ${icon(iconName, 'input-ico')}
+        <input class="text-input text-input-sm has-ico" type="${type}" id="a-${key}-${i}"
+               data-i="${i}" data-k="${key}" value="${value}"
+               ${placeholder ? `placeholder="${escapeHtml(placeholder)}"` : ''}
+               ${opts.combo ? 'autocomplete="off"' : ''} />
+      </div>
+    </div>`;
+}
 
 function renderAssignments() {
   assignmentsList.innerHTML = state.assignments
     .map(
-      (text, i) => `
+      (a, i) => `
       <div class="assignment-card">
         <div class="assignment-head">
-          <label class="assignment-num" for="assignment-${i}">Assignment ${i + 1}${i > 0 ? ' · optional' : ''}</label>
+          <span class="assignment-num">Assignment ${i + 1}${i > 0 ? ' · optional' : ''}</span>
           ${state.assignments.length > 1
             ? `<button type="button" class="assignment-remove" data-remove="${i}">Remove</button>`
             : ''}
         </div>
-        <textarea class="text-input assignment-text" id="assignment-${i}" rows="4"
-          data-i="${i}" placeholder="${escapeHtml(ASSIGNMENT_PLACEHOLDER)}">${escapeHtml(text)}</textarea>
+
+        <div class="assignment-grid">
+          ${textField(i, 'title', 'Title of project', 'clipboard', 'Enterprise Cloud Migration & Modernization', { span: true })}
+          ${textField(i, 'client', 'Client / Organization', 'building', 'Global FinTech Solutions')}
+          ${textField(i, 'country', 'Country', 'globe', 'Start typing…', { combo: true })}
+
+          <div class="a-field">
+            <label class="sub-label" for="a-from-${i}">From</label>
+            <div class="input-wrap">
+              ${icon('calendar', 'input-ico')}
+              <input class="text-input text-input-sm has-ico" type="month" id="a-from-${i}"
+                     data-i="${i}" data-k="from" value="${escapeHtml(a.from)}" />
+            </div>
+          </div>
+          <div class="a-field">
+            <label class="sub-label" for="a-to-${i}">To</label>
+            <div class="input-wrap">
+              ${icon('calendar', 'input-ico')}
+              <input class="text-input text-input-sm has-ico" type="month" id="a-to-${i}"
+                     data-i="${i}" data-k="to" value="${escapeHtml(a.to)}" />
+            </div>
+          </div>
+
+          ${textField(i, 'role', 'Your role', 'user', 'Lead Project Manager', { span: true })}
+
+          <div class="a-field a-span">
+            <label class="sub-label" for="a-description-${i}">Short description</label>
+            <textarea class="text-input assignment-text" id="a-description-${i}" rows="3"
+                      data-i="${i}" data-k="description"
+                      placeholder="What you delivered, the scale of it, and the outcome.">${escapeHtml(a.description)}</textarea>
+          </div>
+        </div>
       </div>`
     )
     .join('');
+
   addAssignmentBtn.hidden = state.assignments.length >= MAX_ASSIGNMENTS;
   growAllAssignments();
+
+  // Country fields are re-created on every render, so re-attach the picker
+  $$('input[data-k="country"]', assignmentsList).forEach((input) => {
+    if (input.dataset.combo) return;
+    attachAutocomplete(input, COUNTRIES);
+    input.dataset.combo = '1';
+  });
 }
 
 /* Grow the box with its content instead of scrolling inside a short window —
@@ -479,10 +533,10 @@ function growAllAssignments() {
 }
 
 assignmentsList.addEventListener('input', (e) => {
-  const { i } = e.target.dataset;
-  if (i == null) return;
-  state.assignments[Number(i)] = e.target.value;
-  autoGrow(e.target);
+  const { i, k } = e.target.dataset;
+  if (i == null || !k) return;
+  state.assignments[Number(i)][k] = e.target.value;
+  if (k === 'description') autoGrow(e.target);
   saveDraft();
 });
 
@@ -490,27 +544,47 @@ assignmentsList.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-remove]');
   if (!btn) return;
   state.assignments.splice(Number(btn.dataset.remove), 1);
-  if (!state.assignments.length) state.assignments.push('');
+  if (!state.assignments.length) state.assignments.push(emptyAssignment());
   renderAssignments();
   saveDraft();
 });
 
 addAssignmentBtn.addEventListener('click', () => {
   if (state.assignments.length >= MAX_ASSIGNMENTS) return;
-  state.assignments.push('');
+  state.assignments.push(emptyAssignment());
   renderAssignments();
-  const added = document.getElementById(`assignment-${state.assignments.length - 1}`);
+  const added = document.getElementById(`a-title-${state.assignments.length - 1}`);
   if (added) added.focus();
   saveDraft();
 });
 
 function filledAssignments() {
-  return state.assignments.map((t) => t.trim()).filter(Boolean);
+  return state.assignments.filter((a) => Object.values(a).some((v) => v && v.trim()));
+}
+
+/* "2022-01" → "Jan 2022"; anything unparsable passes through unchanged so a
+   browser without <input type="month"> (which degrades to text) still works. */
+function formatMonth(value) {
+  const m = /^(\d{4})-(\d{2})$/.exec(value || '');
+  if (!m) return value || '';
+  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${names[Number(m[2]) - 1] || ''} ${m[1]}`.trim();
+}
+
+function assignmentPeriod(a) {
+  const from = formatMonth(a.from);
+  const to = formatMonth(a.to);
+  if (from && to) return `${from} – ${to}`;
+  return from || to || '';
 }
 
 function serializeAssignments() {
   return filledAssignments()
-    .map((text, i) => `${i + 1}. ${text}`)
+    .map((a, i) => {
+      const meta = [a.client, a.country, assignmentPeriod(a), a.role].filter(Boolean).join(', ');
+      const head = [a.title || 'Untitled', meta].filter(Boolean).join(' — ');
+      return `${i + 1}. ${head}${a.description ? `\n${a.description}` : ''}`;
+    })
     .join('\n\n');
 }
 
@@ -590,9 +664,9 @@ const validators = {
     else if (words < CONFIG.MIN_SUMMARY_WORDS) {
       errors.push(['summary', `Please write at least ${CONFIG.MIN_SUMMARY_WORDS} words (currently ${words}).`]);
     }
-    const first = (state.assignments[0] || '').trim();
-    if (first.length < 20) {
-      errors.push(['assignments', 'Please describe Assignment 1 — include the project title, client, and a short description.']);
+    const first = state.assignments[0] || emptyAssignment();
+    if (!first.title.trim() || !first.description.trim()) {
+      errors.push(['assignments', 'Assignment 1 needs at least a project title and a short description.']);
     }
     return errors;
   },
@@ -1085,12 +1159,13 @@ function restoreDraft() {
   if (Array.isArray(draft.assignmentsList) && draft.assignmentsList.length) {
     state.assignments = draft.assignmentsList
       .slice(0, MAX_ASSIGNMENTS)
-      .map((a) => {
-        if (typeof a === 'string') return a;
-        // migrate old structured drafts to free text
-        const meta = [a.client, a.country, a.duration, a.role].filter(Boolean).join(', ');
-        return [[a.title, meta].filter(Boolean).join(' — '), a.description || ''].filter(Boolean).join('\n');
-      });
+      .map((a) =>
+        // Older drafts stored one free-text block per assignment; keep the
+        // text by dropping it into the description field.
+        typeof a === 'string'
+          ? { ...emptyAssignment(), description: a }
+          : { ...emptyAssignment(), ...a }
+      );
     renderAssignments();
   }
 
@@ -1167,9 +1242,9 @@ function renderReview() {
       rows: [
         ['Languages', data.languages],
         ['Summary', `${wordCount(data.summary)} words`],
-        ['Key assignments', filledAssignments().map((t) => {
-          const firstLine = t.split('\n')[0];
-          return firstLine.length > 90 ? `${firstLine.slice(0, 90)}…` : firstLine;
+        ['Key assignments', filledAssignments().map((a) => {
+          const meta = [a.client, assignmentPeriod(a)].filter(Boolean).join(', ');
+          return truncate([a.title || 'Untitled', meta].filter(Boolean).join(' — '), 90);
         }).join('\n') || '—'],
       ],
     },
