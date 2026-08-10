@@ -8,6 +8,10 @@
 'use strict';
 
 const CONFIG = {
+  /* Where submissions are POSTed. Either endpoint works — see README:
+     · Power Automate  "When an HTTP request is received"  → OneDrive / Excel
+     · Google Apps Script web app                          → Sheets / Drive
+     Left empty, the form validates fully but refuses to submit. */
   SUBMIT_URL: '',
   MIN_FILE_FALLBACK_MB: 10,
 };
@@ -778,10 +782,39 @@ function renderReview() {
         </div>`).join('')}
     </div>`).join('');
 
-  $('#reviewContent').innerHTML = banner + groups;
+  const downloads = `
+    <div class="review-downloads">
+      <span class="review-downloads-label">Keep a copy of your answers</span>
+      <div class="review-downloads-row">
+        <button type="button" class="download-btn" data-download="pdf">
+          ${typeof icon === 'function' ? icon('doc') : ''} Save as PDF
+        </button>
+        <button type="button" class="download-btn" data-download="xlsx">
+          ${typeof icon === 'function' ? icon('chart') : ''} Download Excel
+        </button>
+      </div>
+    </div>`;
+
+  $('#reviewContent').innerHTML = banner + groups + downloads;
   $$('#reviewContent [data-goto]').forEach((btn) =>
     btn.addEventListener('click', () => goToStep(Number(btn.dataset.goto))));
+  $$('#reviewContent [data-download]').forEach((btn) =>
+    btn.addEventListener('click', () => downloadCopy(btn.dataset.download)));
 }
+
+function downloadCopy(kind) {
+  if (kind === 'xlsx') {
+    downloadBytes(`${exportBaseName()}.xlsx`, buildXlsx(buildWorkbookRows(), 'Application'),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  } else {
+    // The browser's own print pipeline handles fonts, so non-Latin answers
+    // survive in the PDF — something a hand-rolled PDF writer would not manage.
+    printHtmlAsPdf(buildPrintableHtml());
+  }
+}
+
+$$('#successDownloads [data-download]').forEach((btn) =>
+  btn.addEventListener('click', () => downloadCopy(btn.dataset.download)));
 
 /* ------------------------------------------------------------ Submission */
 
@@ -792,6 +825,48 @@ function fileToBase64(file) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+/* Answers grouped by section — the shape both the printable copy and the
+   workbook are built from. */
+function answerSections() {
+  return schema.steps.map((step) => ({
+    title: step.title,
+    rows: step.questions.filter(isQuestionVisible).map((q) => [q.title, answerSummary(q)]),
+  })).filter((s) => s.rows.length);
+}
+
+function applicantLabel() {
+  const q = allQuestions.find((x) => /name/i.test(x.title) && x.type === 'short_text' && isQuestionVisible(x));
+  return (q ? String(adapterFor(q).get(q) || '') : '').trim() || 'Applicant';
+}
+
+function exportBaseName() {
+  const safe = applicantLabel().replace(/[^\p{L}\p{N} .\-_]/gu, '').trim().slice(0, 60) || 'Applicant';
+  return `ISTC EOI — ${safe}`;
+}
+
+function buildWorkbookRows() {
+  const rows = [['Section', 'Question', 'Answer']];
+  answerSections().forEach((s) => s.rows.forEach(([k, v]) => rows.push([s.title, k, v])));
+  return rows;
+}
+
+function buildPrintableHtml() {
+  return buildApplicationHtml(
+    schema.title || 'Expression of Interest',
+    answerSections(),
+    { submittedAt: new Date().toLocaleString(), reference: applicantLabel() }
+  );
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
 }
 
 async function buildPayload() {
@@ -805,7 +880,25 @@ async function buildPayload() {
   const answers = allQuestions
     .filter((q) => q.type !== 'file' && isQuestionVisible(q))
     .map((q) => ({ id: q.id, title: q.title, value: answerSummary(q) }));
-  return { schemaVersion: schema.version, answers, raw: collectAnswers(), files, submittedAt: new Date().toISOString() };
+
+  // The workbook and the printable document travel with the submission so the
+  // receiving flow can drop ready-made files into OneDrive without rebuilding
+  // them (and can convert the HTML to PDF with fonts intact).
+  const workbook = buildXlsx(buildWorkbookRows(), 'Application');
+
+  return {
+    schemaVersion: schema.version,
+    applicant: applicantLabel(),
+    baseName: exportBaseName(),
+    answers,
+    raw: collectAnswers(),
+    files,
+    documents: {
+      xlsx: { name: `${exportBaseName()}.xlsx`, data: bytesToBase64(workbook) },
+      html: { name: `${exportBaseName()}.html`, data: buildPrintableHtml() },
+    },
+    submittedAt: new Date().toISOString(),
+  };
 }
 
 async function submitApplication() {

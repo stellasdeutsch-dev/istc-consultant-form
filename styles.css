@@ -1765,6 +1765,49 @@ legend.field-label { margin-bottom: 0.75rem; }
 .review-warn-link:hover { background: var(--danger-tint); }
 .review-warn-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
+/* Download buttons (review + success) */
+
+.review-downloads {
+  border-top: 1px solid var(--separator);
+  margin-top: 0.5rem;
+  padding-top: 1.125rem;
+}
+
+.review-downloads-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 0.625rem;
+}
+
+.review-downloads-row,
+.success-downloads { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.success-downloads { justify-content: center; margin: 0 0 1.5rem; }
+
+.download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4375rem;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--separator);
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  transition: border-color 150ms var(--ease-out), background 150ms var(--ease-out), transform 120ms var(--ease-out);
+}
+
+.download-btn .ico { width: 1rem; height: 1rem; }
+.download-btn:hover { border-color: var(--accent); background: var(--accent-tint); }
+.download-btn:active { transform: scale(0.97); }
+.download-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
 .review-group { border-top: 1px solid var(--separator); padding: 1.125rem 0; }
 .review-group:first-child { border-top: 0; padding-top: 0; }
 

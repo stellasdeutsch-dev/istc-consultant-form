@@ -94,7 +94,35 @@ node scripts/build-map.js
 Each country carries a UN-subregion-derived region tag, which drives the
 region quick-select chips and the regions recorded on submission.
 
+## Excel and PDF from the answers
+
+`export.js` builds both in the browser, with no libraries:
+
+- **Excel** — a real `.xlsx` (minimal OOXML inside a store-only ZIP). Verified
+  against `unzip` and `openpyxl`; Cyrillic, newlines and characters like `<`
+  and `&` all round-trip intact. Every cell is written as an inline string so
+  Excel never reinterprets a phone number or a leading zero.
+- **PDF** — the answers are laid out as a print-ready HTML document and sent
+  through the browser's own print pipeline (*Save as PDF*). Going through the
+  browser rather than hand-writing a PDF is deliberate: the standard PDF fonts
+  cover Latin-1 only, so a hand-rolled writer would mangle Cyrillic.
+
+Applicants get both as buttons on the review page and again after submitting.
+Each submission also carries a ready-made workbook and the printable HTML, so
+the receiving flow can file them without regenerating anything.
+
 ## ⚠️ Connect the backend (required before accepting submissions)
+
+Two options, same payload — set `CONFIG.SUBMIT_URL` in [`app.js`](app.js) to
+whichever you deploy:
+
+- **OneDrive / Excel / PDF** → [`power-automate/README.md`](power-automate/README.md)
+- **Google Sheets / Drive** → the Apps Script below
+
+A static site cannot write to OneDrive by itself: Microsoft Graph needs an
+authenticated caller and no secret can live in public JavaScript. A Power
+Automate flow with an HTTP trigger is the supported route — ISTC owns the flow
+and its OneDrive credentials, and the form only knows a URL.
 
 GitHub Pages only serves static files — it cannot store submissions. The included
 Google Apps Script backend writes each application to a Google Sheet and saves

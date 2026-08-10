@@ -9,7 +9,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a6bef'/%3E%3Ctext x='32' y='42' font-family='-apple-system,Helvetica,Arial' font-size='26' font-weight='700' fill='white' text-anchor='middle'%3EI%3C/text%3E%3C/svg%3E" />
   <!-- ?v= is a cache-busting token: bump it on every deploy so returning
        visitors never run a stale mix of old CSS with new JS. -->
-  <link rel="stylesheet" href="styles.css?v=2026-08-10g" />
+  <link rel="stylesheet" href="styles.css?v=2026-08-10h" />
 </head>
 <body>
 
@@ -260,6 +260,10 @@
           Your Expression of Interest has been received. ISTC will contact you should a suitable
           assignment arise. Inclusion in the Consultant Database does not guarantee a contract award.
         </p>
+        <div class="success-downloads" id="successDownloads">
+          <button type="button" class="download-btn" data-download="pdf">Save as PDF</button>
+          <button type="button" class="download-btn" data-download="xlsx">Download Excel</button>
+        </div>
         <p class="success-text success-text-small">
           You may request removal of your profile at any time by writing to
           <a href="mailto:consulting.tenders@istc.int">consulting.tenders@istc.int</a>.
@@ -279,14 +283,15 @@
 
   <!-- Order matters: schema + icons + map must exist before render.js builds
        the form, and app.js wires the rendered DOM. -->
-  <script src="form-schema.js?v=2026-08-10g"></script>
-  <script src="schema.js?v=2026-08-10g"></script>
-  <script src="data.js?v=2026-08-10g"></script>
-  <script src="map-data.js?v=2026-08-10g"></script>
-  <script src="map.js?v=2026-08-10g"></script>
-  <script src="icons.js?v=2026-08-10g"></script>
-  <script src="render.js?v=2026-08-10g"></script>
-  <script src="app.js?v=2026-08-10g"></script>
-  <script src="landing.js?v=2026-08-10g"></script>
+  <script src="form-schema.js?v=2026-08-10h"></script>
+  <script src="schema.js?v=2026-08-10h"></script>
+  <script src="data.js?v=2026-08-10h"></script>
+  <script src="map-data.js?v=2026-08-10h"></script>
+  <script src="map.js?v=2026-08-10h"></script>
+  <script src="icons.js?v=2026-08-10h"></script>
+  <script src="render.js?v=2026-08-10h"></script>
+  <script src="export.js?v=2026-08-10h"></script>
+  <script src="app.js?v=2026-08-10h"></script>
+  <script src="landing.js?v=2026-08-10h"></script>
 </body>
 </html>
