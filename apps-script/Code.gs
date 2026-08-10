@@ -24,48 +24,16 @@
 var FOLDER_NAME = 'ISTC Consultant Database — Uploads';
 var SHEET_NAME = 'Applications';
 
-var HEADERS = [
-  'Timestamp',
-  'Role',
-  'Legal Status',
-  'Organization',
-  'Full Name / Contact Person',
-  'Nationality',
-  'Country of Residence',
-  'Email',
-  'Phone',
-  'Areas of Expertise',
-  'Other Expertise',
-  'Years of Experience',
-  'Regions',
-  'Countries',
-  'Country Codes',
-  'Languages',
-  'Summary of Expertise',
-  'Key Assignments',
-  'Availability',
-  'Daily Rate (EUR)',
-  'Hourly Rate (EUR)',
-  'Previous Work with ISTC',
-  'Reference Number',
-  'Conflict of Interest Agreed',
-  'Data Protection Agreed',
-  'CV',
-  'Certifications',
-  'Publications',
-];
-
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
 
-    // Minimal server-side sanity checks
-    if (!data.fullName || !data.email) {
-      return jsonResponse({ ok: false, error: 'Missing required fields.' });
+    if (!data.answers || !data.answers.length) {
+      return jsonResponse({ ok: false, error: 'Empty submission.' });
     }
 
     var fileLinks = saveFiles(data);
-    appendRow(data, fileLinks);
+    appendDynamicRow(data, fileLinks);
 
     return jsonResponse({ ok: true });
   } catch (err) {
@@ -73,71 +41,67 @@ function doPost(e) {
   }
 }
 
-function saveFiles(data) {
-  var links = { cv: '', certifications: '', publications: '' };
-  var files = data.files || {};
-  var hasAny = ['cv', 'certifications', 'publications'].some(function (k) {
-    return files[k] && files[k].data;
+/**
+ * The form is schema-driven, so its questions can change in admin.html
+ * without touching this script. Columns are therefore derived from the
+ * submission itself: existing headers are reused, and any question we
+ * have not seen before is appended as a new column.
+ */
+function appendDynamicRow(data, fileLinks) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
+
+  var headers = sheet.getLastRow() > 0
+    ? sheet.getRange(1, 1, 1, Math.max(1, sheet.getLastColumn())).getValues()[0]
+    : [];
+  if (!headers.length || !headers[0]) headers = ['Timestamp'];
+
+  var row = {};
+  row['Timestamp'] = new Date();
+
+  (data.answers || []).forEach(function (a) {
+    row[a.title || a.id] = a.value;
   });
-  if (!hasAny) return links;
+
+  Object.keys(fileLinks).forEach(function (key) {
+    if (fileLinks[key]) row['File: ' + key] = fileLinks[key];
+  });
+
+  // Grow the header row with any newly added questions
+  Object.keys(row).forEach(function (name) {
+    if (headers.indexOf(name) === -1) headers.push(name);
+  });
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.setFrozenRows(1);
+
+  var values = headers.map(function (name) {
+    return row[name] === undefined ? '' : row[name];
+  });
+  sheet.appendRow(values);
+}
+
+function saveFiles(data) {
+  var links = {};
+  var files = data.files || {};
+  var keys = Object.keys(files).filter(function (k) { return files[k] && files[k].data; });
+  if (!keys.length) return links;
 
   var root = getOrCreateFolder(FOLDER_NAME);
   var stamp = Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd HHmm');
-  var sub = root.createFolder((data.fullName || 'Applicant') + ' — ' + stamp);
+  var sub = root.createFolder(applicantName(data) + ' — ' + stamp);
 
-  ['cv', 'certifications', 'publications'].forEach(function (key) {
+  keys.forEach(function (key) {
     var f = files[key];
-    if (f && f.data) {
-      var blob = Utilities.newBlob(
-        Utilities.base64Decode(f.data),
-        f.type || 'application/octet-stream',
-        f.name || key
-      );
-      links[key] = sub.createFile(blob).getUrl();
-    }
+    var blob = Utilities.newBlob(
+      Utilities.base64Decode(f.data),
+      f.type || 'application/octet-stream',
+      f.name || key
+    );
+    links[key] = sub.createFile(blob).getUrl();
   });
 
   return links;
-}
-
-function appendRow(data, fileLinks) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(HEADERS);
-    sheet.setFrozenRows(1);
-  }
-
-  sheet.appendRow([
-    new Date(),
-    data.role || '',
-    data.legalStatus || '',
-    data.orgName || '',
-    data.fullName || '',
-    data.nationality || '',
-    data.countryResidence || '',
-    data.email || '',
-    data.phone || '',
-    (data.expertise || []).join(', '),
-    data.expertiseOther || '',
-    data.experience || '',
-    (data.geography || []).join(', '),
-    (data.countries || []).join(', '),
-    (data.countryCodes || []).join(' '),
-    data.languages || '',
-    data.summary || '',
-    data.assignments || '',
-    (data.availability || []).join(', '),
-    data.dailyRate || '',
-    data.hourlyRate || '',
-    data.previousWork || '',
-    data.referenceNumber || '',
-    data.conflictAgree ? 'Yes' : 'No',
-    data.dataAgree ? 'Yes' : 'No',
-    fileLinks.cv,
-    fileLinks.certifications,
-    fileLinks.publications,
-  ]);
 }
 
 function getOrCreateFolder(name) {
@@ -149,4 +113,14 @@ function jsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
     ContentService.MimeType.JSON
   );
+}
+
+/** Best-effort label for the Drive subfolder, whatever the schema calls it. */
+function applicantName(data) {
+  var answers = data.answers || [];
+  for (var i = 0; i < answers.length; i++) {
+    var t = String(answers[i].title || '').toLowerCase();
+    if (t.indexOf('name') !== -1 && answers[i].value) return String(answers[i].value).slice(0, 60);
+  }
+  return 'Applicant';
 }

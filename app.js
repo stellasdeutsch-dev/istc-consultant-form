@@ -1,121 +1,77 @@
 /* ============================================================
    ISTC Consultant Database — Expression of Interest
-   Multi-step form: navigation, validation, smart inputs,
-   files, drafts, submission. Depends on data.js lists.
+   Schema-driven form: every step and question comes from
+   schema.js (editable in admin.html). This file owns flow —
+   navigation, validation, widgets, drafts, review, submission.
    ============================================================ */
 
 'use strict';
 
-/* ------------------------------------------------------------
-   CONFIG — set SUBMIT_URL to your deployed Google Apps Script
-   web-app URL (see apps-script/Code.gs and README.md).
-   ------------------------------------------------------------ */
 const CONFIG = {
   SUBMIT_URL: '',
-  MAX_FILE_BYTES: 10 * 1024 * 1024, // 10 MB
-  MIN_SUMMARY_WORDS: 500,
+  MIN_FILE_FALLBACK_MB: 10,
 };
 
-const EXPERTISE_OPTIONS = [
-  'Chemical Risk, Safety & Security',
-  'Biological Risk, Safety & Security',
-  'Radiological & Nuclear Risk, Safety & Security',
-  'CBRN Incident Response Planning',
-  'Legislative Harmonization & Implementation Support',
-  'Disease Surveillance & Epidemiology',
-  'Effect of Climate Change on Security Culture',
-  'Space-based Technologies',
-  'Cybersecurity',
-  'Physical and Operational Security of Facilities',
-  'Open Source Intelligence',
-  'Export Control & Non-Proliferation',
-  'Research Proposal Evaluation (Peer Review / Ex-ante Evaluation)',
-  'Ex-post Project Evaluation',
-  'Other (specify)',
-];
-
-const TOTAL_STEPS = 11;
-const DRAFT_KEY = 'istc-eoi-draft-v5';
-const MAX_ASSIGNMENTS = 3;
-
-/* ------------------------------------------------------------ State */
-
-function emptyAssignment() {
-  return { title: '', client: '', country: '', from: '', to: '', role: '', description: '' };
-}
-
-const state = {
-  step: 0, // 0 = intro, 1..11 = form, 12 = success
-  files: { cv: null, certifications: null, publications: null },
-  languages: [], // [{ name, level }]
-  assignments: [emptyAssignment()], // up to 3
-};
-
-const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-
-/* ------------------------------------------------------------ Elements */
+const schema = loadSchema();
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 const form = $('#eoiForm');
-const steps = new Map($$('.step').map((el) => [el.dataset.step, el]));
+renderForm(schema, form);
+
+const DRAFT_KEY = 'istc-eoi-answers-v1';
+const TOTAL_STEPS = schema.steps.length + 1; // + review
+const REVIEW_STEP = TOTAL_STEPS;
+
+const STEP_LABELS = [...schema.steps.map((s) => s.navLabel || s.title), 'Review'];
+
+/* Shared widget state the render adapters read from */
+window.__formFiles = {};
+window.__countryPickers = {};
+window.__languageSets = {};
+window.__assignmentSets = {};
+
+const state = { step: 0 };
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+const steps = new Map();
+$$('.step').forEach((el) => steps.set(el.dataset.step, el));
+
 const stepNav = $('#stepNav');
 const backBtn = $('#backBtn');
 const nextBtn = $('#nextBtn');
-const startBtn = $('#startBtn');
 const progressFill = $('#progressFill');
 const stepIndicator = $('#stepIndicator');
 const themeToggle = $('#themeToggle');
-const languageInput = $('#languageInput');
-const languageChipsEl = $('#languageChips');
-const languageField = $('#languageField');
 
-/* ------------------------------------------------------------ Theme (light by default, dark opt-in) */
+const allQuestions = schema.steps.flatMap((s) => s.questions);
+const questionById = new Map(allQuestions.map((q) => [q.id, q]));
+const stepOfQuestion = new Map();
+schema.steps.forEach((s, i) => s.questions.forEach((q) => stepOfQuestion.set(q.id, i + 1)));
+
+const adapterFor = (q) => ADAPTERS[q.type] || ADAPTERS.short_text;
+
+/* ------------------------------------------------------------ Theme */
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  themeToggle.setAttribute(
-    'aria-label',
-    theme === 'dark' ? 'Switch to light appearance' : 'Switch to dark appearance'
-  );
+  themeToggle.setAttribute('aria-label',
+    theme === 'dark' ? 'Switch to light appearance' : 'Switch to dark appearance');
   try { localStorage.setItem('istc-theme', theme); } catch (_) { /* ignore */ }
 }
 
 themeToggle.addEventListener('click', () => {
   applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 });
-
 applyTheme(document.documentElement.dataset.theme || 'light');
 
 /* ------------------------------------------------------------ Helpers */
-
-function wordCount(text) {
-  return text.trim().split(/\s+/).filter(Boolean).length;
-}
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function getRadio(name) {
-  const el = form.querySelector(`input[name="${name}"]:checked`);
-  return el ? el.value : '';
-}
-
-function getChecks(name) {
-  return $$(`input[name="${name}"]:checked`, form).map((el) => el.value);
-}
-
-function getValue(id) {
-  const el = document.getElementById(id);
-  return el ? el.value.trim() : '';
-}
-
-function isFirm() {
-  return getRadio('legalStatus') === 'Consulting Firm / Organization';
 }
 
 function truncate(text, max) {
@@ -125,60 +81,34 @@ function truncate(text, max) {
 
 function escapeHtml(value) {
   return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
-
-/* ------------------------------------------------------------ Option injection */
-
-function injectOptions(container, name, options) {
-  container.innerHTML = options
-    .map(
-      (value) => `
-      <label class="option option-compact">
-        <input type="checkbox" name="${name}" value="${escapeHtml(value)}" />
-        <span class="option-check option-check-square" aria-hidden="true"></span>
-        <span class="option-body"><span class="option-title">${escapeHtml(value)}</span></span>
-      </label>`
-    )
-    .join('');
-}
-
-injectOptions($('[data-error-anchor="expertise"]'), 'expertise', EXPERTISE_OPTIONS);
 
 /* ------------------------------------------------------------ Errors */
 
 function showError(key, message) {
-  const el = form.querySelector(`[data-error-for="${key}"]`) || $(`[data-error-for="${key}"]`);
-  if (!el) return;
-  el.textContent = message;
-  el.hidden = false;
-  const anchor = form.querySelector(`[data-error-anchor="${key}"]`) || document.getElementById(key);
+  const el = $(`[data-error-for="${key}"]`);
+  if (el) { el.textContent = message; el.hidden = false; }
+  const anchor = $(`[data-error-anchor="${key}"]`) || document.getElementById(key);
   if (anchor) {
     anchor.setAttribute('aria-invalid', 'true');
     if (!prefersReducedMotion.matches) {
       anchor.classList.remove('shake');
-      void anchor.offsetWidth; // restart animation
+      void anchor.offsetWidth;
       anchor.classList.add('shake');
     }
   }
 }
 
-function clearErrors(stepEl) {
-  $$('.field-error', stepEl).forEach((el) => {
-    el.hidden = true;
-    el.textContent = '';
-  });
-  $$('[aria-invalid]', stepEl).forEach((el) => el.removeAttribute('aria-invalid'));
+function clearErrors(root) {
+  $$('.field-error', root).forEach((el) => { el.hidden = true; el.textContent = ''; });
+  $$('[aria-invalid]', root).forEach((el) => el.removeAttribute('aria-invalid'));
 }
 
-/* ------------------------------------------------------------ Autocomplete (combobox) */
+/* ------------------------------------------------------------ Autocomplete */
 
 function attachAutocomplete(input, items, { onSelect } = {}) {
-  // Honour an explicit .combo-anchor (the country search sits inside a wider
-  // field and must drop its menu under the input, not the whole block).
   const anchor = input.closest('.combo-anchor') || input.closest('.field') || input.parentElement;
   anchor.classList.add('combo-anchor');
 
@@ -195,332 +125,253 @@ function attachAutocomplete(input, items, { onSelect } = {}) {
   input.setAttribute('aria-expanded', 'false');
   input.setAttribute('autocomplete', 'off');
 
-  function close() {
-    menu.hidden = true;
-    active = -1;
-    input.setAttribute('aria-expanded', 'false');
-  }
+  const close = () => { menu.hidden = true; active = -1; input.setAttribute('aria-expanded', 'false'); };
 
   function paint() {
     [...menu.children].forEach((el, i) => el.classList.toggle('active', i === active));
-    const el = menu.children[active];
-    if (el) el.scrollIntoView({ block: 'nearest' });
-  }
-
-  function open(list) {
-    current = list;
-    active = -1;
-    menu.innerHTML = list
-      .map((v, i) => `<button type="button" class="combo-option" role="option" data-i="${i}">${escapeHtml(v)}</button>`)
-      .join('');
-    menu.hidden = !list.length;
-    input.setAttribute('aria-expanded', String(!!list.length));
+    menu.children[active]?.scrollIntoView({ block: 'nearest' });
   }
 
   function filter() {
     const q = input.value.trim().toLowerCase();
     if (!q) return close();
-    const list = items
+    current = items
       .filter((v) => v.toLowerCase().includes(q))
       .sort((a, b) => Number(b.toLowerCase().startsWith(q)) - Number(a.toLowerCase().startsWith(q)))
       .slice(0, 8);
-    open(list);
+    active = -1;
+    menu.innerHTML = current
+      .map((v, i) => `<button type="button" class="combo-option" role="option" data-i="${i}">${escapeHtml(v)}</button>`)
+      .join('');
+    menu.hidden = !current.length;
+    input.setAttribute('aria-expanded', String(!!current.length));
   }
 
   function choose(i) {
     const value = current[i];
     if (value == null) return;
-    if (onSelect) {
-      onSelect(value);
-    } else {
-      input.value = value;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    }
+    if (onSelect) onSelect(value);
+    else { input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); }
     close();
   }
 
   input.addEventListener('input', filter);
   input.addEventListener('focus', filter);
   input.addEventListener('blur', () => setTimeout(close, 120));
-  menu.addEventListener('pointerdown', (e) => e.preventDefault()); // keep input focus
+  menu.addEventListener('pointerdown', (e) => e.preventDefault());
   menu.addEventListener('click', (e) => {
     const btn = e.target.closest('.combo-option');
     if (btn) choose(Number(btn.dataset.i));
   });
 
   input.addEventListener('keydown', (e) => {
-    if (menu.hidden) {
-      if (e.key === 'ArrowDown') filter();
+    if (menu.hidden) { if (e.key === 'ArrowDown') filter(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, current.length - 1); paint(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); paint(); }
+    else if (e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); choose(active >= 0 ? active : 0); }
+    else if (e.key === 'Escape' || e.key === 'Tab') close();
+  });
+}
+
+/* ------------------------------------------------------------ Widget: files */
+
+function initFileQuestion(q) {
+  const zone = $(`.dropzone[data-file-key="${q.id}"]`);
+  if (!zone) return;
+  const input = $('input[type="file"]', zone);
+  const empty = $('.dropzone-empty', zone);
+  const chip = $('.file-chip', zone);
+  const nameEl = $('.file-chip-name', zone);
+  const sizeEl = $('.file-chip-size', zone);
+  const removeBtn = $('.file-chip-remove', zone);
+  const maxBytes = (q.maxMB || CONFIG.MIN_FILE_FALLBACK_MB) * 1024 * 1024;
+
+  function render() {
+    const file = window.__formFiles[q.id];
+    empty.hidden = !!file;
+    chip.hidden = !file;
+    zone.classList.toggle('has-file', !!file);
+    if (file) { nameEl.textContent = file.name; sizeEl.textContent = formatBytes(file.size); }
+  }
+
+  function accept(file) {
+    const errEl = $(`[data-error-for="${q.id}"]`);
+    if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+    if (!file) return;
+    if (file.size > maxBytes) {
+      showError(q.id, `"${file.name}" is ${formatBytes(file.size)} — the limit is ${q.maxMB || 10} MB.`);
       return;
     }
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      active = Math.min(active + 1, current.length - 1);
-      paint();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      active = Math.max(active - 1, 0);
-      paint();
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      choose(active >= 0 ? active : 0);
-    } else if (e.key === 'Escape' || e.key === 'Tab') {
-      close();
+    window.__formFiles[q.id] = file;
+    render();
+    updateStepper();
+  }
+
+  zone.addEventListener('click', (e) => {
+    if (e.target.closest('.file-chip-remove')) return;
+    if (!window.__formFiles[q.id]) input.click();
+  });
+  zone.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && !window.__formFiles[q.id]) { e.preventDefault(); input.click(); }
+  });
+  input.addEventListener('change', () => { accept(input.files[0]); input.value = ''; });
+  ['dragenter', 'dragover'].forEach((evt) => zone.addEventListener(evt, (e) => { e.preventDefault(); zone.classList.add('dragover'); }));
+  ['dragleave', 'drop'].forEach((evt) => zone.addEventListener(evt, (e) => { e.preventDefault(); zone.classList.remove('dragover'); }));
+  zone.addEventListener('drop', (e) => accept(e.dataTransfer.files[0]));
+  removeBtn.addEventListener('click', () => { window.__formFiles[q.id] = null; render(); updateStepper(); });
+}
+
+/* ------------------------------------------------------------ Widget: languages */
+
+window.__setLanguages = (qid, list) => {
+  window.__languageSets[qid] = (list || []).filter((l) => l && l.name);
+  renderLanguageChips(qid);
+};
+
+function renderLanguageChips(qid) {
+  const host = $(`[data-lang-chips="${qid}"]`);
+  if (!host) return;
+  host.innerHTML = (window.__languageSets[qid] || []).map((lang, i) => `
+    <span class="chip">
+      <span class="chip-name">${escapeHtml(lang.name)}</span>
+      <select class="chip-level" data-i="${i}" aria-label="Proficiency for ${escapeHtml(lang.name)}">
+        ${PROFICIENCY_LEVELS.map((lvl) => `<option value="${lvl}"${lvl === lang.level ? ' selected' : ''}>${lvl}</option>`).join('')}
+      </select>
+      <button type="button" class="chip-x" data-i="${i}" aria-label="Remove ${escapeHtml(lang.name)}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </span>`).join('');
+}
+
+function initLanguagesQuestion(q) {
+  const field = $(`[data-lang-for="${q.id}"]`);
+  const input = document.getElementById(`${q.id}__input`);
+  const chips = $(`[data-lang-chips="${q.id}"]`);
+  if (!field || !input) return;
+  window.__languageSets[q.id] = window.__languageSets[q.id] || [];
+
+  const add = (name, level = 'Working') => {
+    const clean = (name || '').trim().replace(/,+$/, '');
+    if (!clean) return;
+    const list = window.__languageSets[q.id];
+    if (list.some((l) => l.name.toLowerCase() === clean.toLowerCase())) return;
+    list.push({ name: clean, level });
+    renderLanguageChips(q.id);
+    const err = $(`[data-error-for="${q.id}"]`);
+    if (err) err.hidden = true;
+    field.removeAttribute('aria-invalid');
+    saveDraft();
+  };
+
+  attachAutocomplete(input, LANGUAGES, { onSelect: (v) => { add(v); input.value = ''; } });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && input.value.trim()) {
+      e.preventDefault(); e.stopPropagation(); add(input.value); input.value = '';
+    } else if (e.key === 'Backspace' && !input.value && window.__languageSets[q.id].length) {
+      window.__languageSets[q.id].pop(); renderLanguageChips(q.id); saveDraft();
     }
   });
-}
 
-attachAutocomplete($('#nationality'), NATIONALITIES);
-attachAutocomplete($('#countryResidence'), COUNTRIES);
-
-/* ------------------------------------------------------------ Languages (chips with proficiency) */
-
-function renderLanguageChips() {
-  languageChipsEl.innerHTML = state.languages
-    .map(
-      (lang, i) => `
-      <span class="chip">
-        <span class="chip-name">${escapeHtml(lang.name)}</span>
-        <select class="chip-level" data-i="${i}" aria-label="Proficiency for ${escapeHtml(lang.name)}">
-          ${PROFICIENCY_LEVELS.map(
-            (level) => `<option value="${level}"${level === lang.level ? ' selected' : ''}>${level}</option>`
-          ).join('')}
-        </select>
-        <button type="button" class="chip-x" data-i="${i}" aria-label="Remove ${escapeHtml(lang.name)}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-        </button>
-      </span>`
-    )
-    .join('');
-}
-
-function addLanguage(name, level = 'Working') {
-  const clean = name.trim().replace(/,+$/, '');
-  if (!clean) return;
-  if (state.languages.some((l) => l.name.toLowerCase() === clean.toLowerCase())) return;
-  state.languages.push({ name: clean, level });
-  renderLanguageChips();
-  const errEl = form.querySelector('[data-error-for="languages"]');
-  if (errEl) { errEl.hidden = true; }
-  languageField.removeAttribute('aria-invalid');
-  saveDraft();
-}
-
-attachAutocomplete(languageInput, LANGUAGES, {
-  onSelect: (value) => {
-    addLanguage(value);
-    languageInput.value = '';
-  },
-});
-
-languageInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && languageInput.value.trim()) {
-    e.preventDefault();
-    e.stopPropagation();
-    addLanguage(languageInput.value);
-    languageInput.value = '';
-  } else if (e.key === 'Backspace' && !languageInput.value && state.languages.length) {
-    state.languages.pop();
-    renderLanguageChips();
+  field.addEventListener('click', (e) => { if (e.target === field || e.target === chips) input.focus(); });
+  chips.addEventListener('change', (e) => {
+    const sel = e.target.closest('.chip-level');
+    if (!sel) return;
+    window.__languageSets[q.id][Number(sel.dataset.i)].level = sel.value;
     saveDraft();
-  }
-});
-
-languageField.addEventListener('click', (e) => {
-  if (e.target === languageField || e.target === languageChipsEl) languageInput.focus();
-});
-
-languageChipsEl.addEventListener('change', (e) => {
-  const select = e.target.closest('.chip-level');
-  if (!select) return;
-  state.languages[Number(select.dataset.i)].level = select.value;
-  saveDraft();
-});
-
-languageChipsEl.addEventListener('click', (e) => {
-  const btn = e.target.closest('.chip-x');
-  if (!btn) return;
-  state.languages.splice(Number(btn.dataset.i), 1);
-  renderLanguageChips();
-  languageInput.focus();
-  saveDraft();
-});
-
-function serializeLanguages() {
-  return state.languages.map((l) => `${l.name} (${l.level})`).join(', ');
-}
-
-/* ------------------------------------------------------------ Geographic experience (map picker) */
-
-const regionChipsEl = $('#regionChips');
-const countryChipsEl = $('#countryChips');
-const countryCountEl = $('#countryCount');
-const clearCountriesBtn = $('#clearCountries');
-const countrySearch = $('#countrySearch');
-
-const picker = createWorldMap($('#pickerMap'), {
-  mode: 'picker',
-  onChange: () => {
-    renderPickerState();
-    saveDraft();
-  },
-});
-
-function renderPickerState() {
-  const { ids, names } = picker.getSelection();
-
-  countryCountEl.textContent = ids.length
-    ? `${ids.length} ${ids.length === 1 ? 'country' : 'countries'} selected`
-    : 'No countries selected yet';
-  clearCountriesBtn.hidden = !ids.length;
-
-  // Region chips reflect "every country in this region is on"
-  $$('.region-chip', regionChipsEl).forEach((chip) => {
-    const list = countriesInRegion(chip.dataset.region);
-    chip.classList.toggle('is-on', list.length > 0 && list.every((c) => picker.has(c.i)));
+  });
+  chips.addEventListener('click', (e) => {
+    const btn = e.target.closest('.chip-x');
+    if (!btn) return;
+    window.__languageSets[q.id].splice(Number(btn.dataset.i), 1);
+    renderLanguageChips(q.id); input.focus(); saveDraft();
   });
 
-  countryChipsEl.innerHTML = ids
-    .map((id) => COUNTRY_BY_ID.get(id))
-    .sort((a, b) => a.n.localeCompare(b.n))
-    .map(
-      (c) => `
-      <span class="country-chip">
-        ${escapeHtml(c.n)}
+  // Adopt whatever is still typed when the step is validated
+  field.dataset.pendingInput = `${q.id}__input`;
+  field.__adopt = () => { if (input.value.trim()) { add(input.value); input.value = ''; } };
+}
+
+/* ------------------------------------------------------------ Widget: country map */
+
+function initCountryQuestion(q) {
+  const stage = $(`[data-map-for="${q.id}"]`);
+  if (!stage) return;
+  const chipsEl = $(`[data-chips-for="${q.id}"]`);
+  const countEl = $(`[data-count-for="${q.id}"]`);
+  const clearBtn = $(`[data-clear-for="${q.id}"]`);
+  const regionsEl = $(`[data-regions-for="${q.id}"]`);
+  const search = document.getElementById(`${q.id}__search`);
+
+  const picker = createWorldMap(stage, {
+    mode: 'picker',
+    onChange: () => { paint(); saveDraft(); },
+  });
+  window.__countryPickers[q.id] = picker;
+
+  function paint() {
+    const { ids } = picker.getSelection();
+    countEl.textContent = ids.length
+      ? `${ids.length} ${ids.length === 1 ? 'country' : 'countries'} selected`
+      : 'No countries selected yet';
+    clearBtn.hidden = !ids.length;
+    $$('.region-chip', regionsEl).forEach((chip) => {
+      const list = countriesInRegion(chip.dataset.region);
+      chip.classList.toggle('is-on', list.length > 0 && list.every((c) => picker.has(c.i)));
+    });
+    chipsEl.innerHTML = ids.map((id) => COUNTRY_BY_ID.get(id))
+      .sort((a, b) => a.n.localeCompare(b.n))
+      .map((c) => `<span class="country-chip">${escapeHtml(c.n)}
         <button type="button" data-remove-country="${c.i}" aria-label="Remove ${escapeHtml(c.n)}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-        </button>
-      </span>`
-    )
-    .join('');
-
-  if (ids.length) {
-    const errEl = form.querySelector('[data-error-for="geography"]');
-    if (errEl) errEl.hidden = true;
+        </button></span>`).join('');
+    if (ids.length) { const err = $(`[data-error-for="${q.id}"]`); if (err) err.hidden = true; }
   }
-  void names;
-}
 
-regionChipsEl.innerHTML = ISTC_REGIONS.map(
-  (r) => `<button type="button" class="region-chip" data-region="${escapeHtml(r)}">${escapeHtml(r)}</button>`
-).join('');
-
-regionChipsEl.addEventListener('click', (e) => {
-  const chip = e.target.closest('.region-chip');
-  if (chip) picker.toggleRegion(chip.dataset.region);
-});
-
-countryChipsEl.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-remove-country]');
-  if (btn) picker.remove([btn.dataset.removeCountry]);
-});
-
-clearCountriesBtn.addEventListener('click', () => picker.clear());
-
-attachAutocomplete(countrySearch, WORLD_MAP.countries.map((c) => c.n), {
-  onSelect: (name) => {
-    const match = WORLD_MAP.countries.find((c) => c.n === name);
-    if (!match) return;
-    picker.add([match.i]);
-    picker.flash(match.i);
-    countrySearch.value = '';
-  },
-});
-
-renderPickerState();
-
-/* ------------------------------------------------------------ Assignments (free text, up to 3) */
-
-const assignmentsList = $('#assignmentsList');
-const addAssignmentBtn = $('#addAssignment');
-
-function textField(i, key, label, iconName, placeholder, opts = {}) {
-  const value = escapeHtml(state.assignments[i][key]);
-  const type = opts.type || 'text';
-  return `
-    <div class="a-field${opts.span ? ' a-span' : ''}${opts.combo ? ' combo-anchor' : ''}">
-      <label class="sub-label" for="a-${key}-${i}">${label}</label>
-      <div class="input-wrap">
-        ${icon(iconName, 'input-ico')}
-        <input class="text-input text-input-sm has-ico" type="${type}" id="a-${key}-${i}"
-               data-i="${i}" data-k="${key}" value="${value}"
-               ${placeholder ? `placeholder="${escapeHtml(placeholder)}"` : ''}
-               ${opts.combo ? 'autocomplete="off"' : ''} />
-      </div>
-    </div>`;
-}
-
-function renderAssignments() {
-  assignmentsList.innerHTML = state.assignments
-    .map(
-      (a, i) => `
-      <div class="assignment-card">
-        <div class="assignment-head">
-          <span class="assignment-num">Assignment ${i + 1}${i > 0 ? ' · optional' : ''}</span>
-          ${state.assignments.length > 1
-            ? `<button type="button" class="assignment-remove" data-remove="${i}">Remove</button>`
-            : ''}
-        </div>
-
-        <div class="assignment-grid">
-          ${textField(i, 'title', 'Title of project', 'clipboard', 'Enterprise Cloud Migration & Modernization', { span: true })}
-          ${textField(i, 'client', 'Client / Organization', 'building', 'Global FinTech Solutions')}
-          ${textField(i, 'country', 'Country', 'globe', 'Start typing…', { combo: true })}
-
-          <div class="a-field">
-            <label class="sub-label" for="a-from-${i}">From</label>
-            <div class="input-wrap">
-              ${icon('calendar', 'input-ico')}
-              <input class="text-input text-input-sm has-ico" type="month" id="a-from-${i}"
-                     data-i="${i}" data-k="from" value="${escapeHtml(a.from)}" />
-            </div>
-          </div>
-          <div class="a-field">
-            <label class="sub-label" for="a-to-${i}">To</label>
-            <div class="input-wrap">
-              ${icon('calendar', 'input-ico')}
-              <input class="text-input text-input-sm has-ico" type="month" id="a-to-${i}"
-                     data-i="${i}" data-k="to" value="${escapeHtml(a.to)}" />
-            </div>
-          </div>
-
-          ${textField(i, 'role', 'Your role', 'user', 'Lead Project Manager', { span: true })}
-
-          <div class="a-field a-span">
-            <label class="sub-label" for="a-description-${i}">Short description</label>
-            <textarea class="text-input assignment-text" id="a-description-${i}" rows="3"
-                      data-i="${i}" data-k="description"
-                      placeholder="What you delivered, the scale of it, and the outcome.">${escapeHtml(a.description)}</textarea>
-          </div>
-        </div>
-      </div>`
-    )
+  regionsEl.innerHTML = ISTC_REGIONS
+    .map((r) => `<button type="button" class="region-chip" data-region="${escapeHtml(r)}">${escapeHtml(r)}</button>`)
     .join('');
-
-  addAssignmentBtn.hidden = state.assignments.length >= MAX_ASSIGNMENTS;
-  growAllAssignments();
-
-  // Country fields are re-created on every render, so re-attach the picker
-  $$('input[data-k="country"]', assignmentsList).forEach((input) => {
-    if (input.dataset.combo) return;
-    attachAutocomplete(input, COUNTRIES);
-    input.dataset.combo = '1';
+  regionsEl.addEventListener('click', (e) => {
+    const chip = e.target.closest('.region-chip');
+    if (chip) picker.toggleRegion(chip.dataset.region);
   });
+  chipsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-remove-country]');
+    if (btn) picker.remove([btn.dataset.removeCountry]);
+  });
+  clearBtn.addEventListener('click', () => picker.clear());
+
+  if (search) {
+    search.insertAdjacentHTML('beforebegin', typeof icon === 'function' ? icon('eye', 'input-ico') : '');
+    attachAutocomplete(search, WORLD_MAP.countries.map((c) => c.n), {
+      onSelect: (name) => {
+        const match = WORLD_MAP.countries.find((c) => c.n === name);
+        if (!match) return;
+        picker.add([match.i]); picker.flash(match.i); search.value = '';
+      },
+    });
+  }
+
+  paint();
 }
 
-/* Grow the box with its content instead of scrolling inside a short window —
-   an assignment you can't read back is worse than a tall form. */
+/* ------------------------------------------------------------ Widget: assignments */
+
+function emptyAssignment() {
+  return { title: '', client: '', country: '', from: '', to: '', role: '', description: '' };
+}
+
+window.__setAssignments = (qid, list) => {
+  window.__assignmentSets[qid] = (list && list.length ? list : [emptyAssignment()])
+    .map((a) => (typeof a === 'string' ? { ...emptyAssignment(), description: a } : { ...emptyAssignment(), ...a }));
+  renderAssignments(qid);
+};
+
 const ASSIGNMENT_MAX_PX = 560;
 
 function autoGrow(el) {
-  // A hidden element reports scrollHeight 0, which would collapse the box —
-  // measuring is deferred until the step is actually on screen.
   if (!el || !el.offsetParent) return;
   el.style.height = 'auto';
-  // scrollHeight covers content + padding but not the border, while
-  // box-sizing:border-box counts the border in `height` — add it back or the
-  // last line stays clipped by ~2px and the box scrolls anyway.
   const cs = getComputedStyle(el);
   const border = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
   const full = el.scrollHeight + border;
@@ -528,273 +379,270 @@ function autoGrow(el) {
   el.style.overflowY = full > ASSIGNMENT_MAX_PX ? 'auto' : 'hidden';
 }
 
-function growAllAssignments() {
-  $$('.assignment-text', assignmentsList).forEach(autoGrow);
+function assignmentField(qid, i, key, label, iconName, placeholder, opts = {}) {
+  const a = window.__assignmentSets[qid][i];
+  return `
+    <div class="a-field${opts.span ? ' a-span' : ''}${opts.combo ? ' combo-anchor' : ''}">
+      <label class="sub-label" for="${qid}-${key}-${i}">${label}</label>
+      <div class="input-wrap">
+        ${typeof icon === 'function' ? icon(iconName, 'input-ico') : ''}
+        <input class="text-input text-input-sm has-ico" type="${opts.type || 'text'}"
+               id="${qid}-${key}-${i}" data-a-i="${i}" data-a-k="${key}"
+               value="${escapeHtml(a[key])}"
+               ${placeholder ? `placeholder="${escapeHtml(placeholder)}"` : ''} />
+      </div>
+    </div>`;
 }
 
-assignmentsList.addEventListener('input', (e) => {
-  const { i, k } = e.target.dataset;
-  if (i == null || !k) return;
-  state.assignments[Number(i)][k] = e.target.value;
-  if (k === 'description') autoGrow(e.target);
-  saveDraft();
+function renderAssignments(qid) {
+  const host = $(`[data-assignments-for="${qid}"]`);
+  if (!host) return;
+  const list = window.__assignmentSets[qid];
+  const q = questionById.get(qid);
+  const max = q?.maxItems || 3;
+
+  host.innerHTML = list.map((a, i) => `
+    <div class="assignment-card">
+      <div class="assignment-head">
+        <span class="assignment-num">Assignment ${i + 1}${i > 0 ? ' · optional' : ''}</span>
+        ${list.length > 1 ? `<button type="button" class="assignment-remove" data-a-remove="${i}">Remove</button>` : ''}
+      </div>
+      <div class="assignment-grid">
+        ${assignmentField(qid, i, 'title', 'Title of project', 'clipboard', 'Enterprise Cloud Migration & Modernization', { span: true })}
+        ${assignmentField(qid, i, 'client', 'Client / Organization', 'building', 'Global FinTech Solutions')}
+        ${assignmentField(qid, i, 'country', 'Country', 'globe', 'Start typing…', { combo: true })}
+        ${assignmentField(qid, i, 'from', 'From', 'calendar', '', { type: 'month' })}
+        ${assignmentField(qid, i, 'to', 'To', 'calendar', '', { type: 'month' })}
+        ${assignmentField(qid, i, 'role', 'Your role', 'user', 'Lead Project Manager', { span: true })}
+        <div class="a-field a-span">
+          <label class="sub-label" for="${qid}-description-${i}">Short description</label>
+          <textarea class="text-input assignment-text" id="${qid}-description-${i}" rows="3"
+                    data-a-i="${i}" data-a-k="description"
+                    placeholder="What you delivered, the scale of it, and the outcome.">${escapeHtml(a.description)}</textarea>
+        </div>
+      </div>
+    </div>`).join('');
+
+  const addBtn = $(`[data-add-assignment="${qid}"]`);
+  if (addBtn) addBtn.hidden = list.length >= max;
+
+  $$('.assignment-text', host).forEach(autoGrow);
+  $$('input[data-a-k="country"]', host).forEach((input) => {
+    if (input.dataset.combo) return;
+    attachAutocomplete(input, COUNTRIES);
+    input.dataset.combo = '1';
+  });
+}
+
+function initAssignmentsQuestion(q) {
+  const host = $(`[data-assignments-for="${q.id}"]`);
+  if (!host) return;
+  window.__assignmentSets[q.id] = window.__assignmentSets[q.id] || [emptyAssignment()];
+  renderAssignments(q.id);
+
+  host.addEventListener('input', (e) => {
+    const { aI, aK } = e.target.dataset;
+    if (aI == null || !aK) return;
+    window.__assignmentSets[q.id][Number(aI)][aK] = e.target.value;
+    if (aK === 'description') autoGrow(e.target);
+    saveDraft();
+  });
+
+  host.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-a-remove]');
+    if (!btn) return;
+    const list = window.__assignmentSets[q.id];
+    list.splice(Number(btn.dataset.aRemove), 1);
+    if (!list.length) list.push(emptyAssignment());
+    renderAssignments(q.id); saveDraft();
+  });
+
+  $(`[data-add-assignment="${q.id}"]`)?.addEventListener('click', () => {
+    const list = window.__assignmentSets[q.id];
+    if (list.length >= (q.maxItems || 3)) return;
+    list.push(emptyAssignment());
+    renderAssignments(q.id);
+    document.getElementById(`${q.id}-title-${list.length - 1}`)?.focus();
+    saveDraft();
+  });
+}
+
+/* ------------------------------------------------------------ Widget: rate pair */
+
+function initRatePair(q) {
+  const daily = document.getElementById(`${q.id}__daily`);
+  const hourly = document.getElementById(`${q.id}__hourly`);
+  const hint = $(`[data-rate-hint="${q.id}"]`);
+  if (!daily || !hourly) return;
+  const HOURS = 8;
+  let dailySuggested = false;
+  let hourlySuggested = false;
+
+  function updateHint() {
+    const d = Number(daily.value);
+    const h = Number(hourly.value);
+    if (d > 0 && h > 0) {
+      hint.textContent = (dailySuggested || hourlySuggested)
+        ? `Based on an ${HOURS}-hour day we filled in the other rate — edit it if your rate differs.`
+        : `That works out to ${(d / h).toFixed(1)} hours per day.`;
+      hint.hidden = false;
+    } else hint.hidden = true;
+  }
+
+  daily.addEventListener('input', () => {
+    dailySuggested = false;
+    const d = Number(daily.value);
+    if (d > 0 && (!hourly.value || hourlySuggested)) { hourly.value = Math.round(d / HOURS); hourlySuggested = true; }
+    updateHint();
+  });
+  hourly.addEventListener('input', () => {
+    hourlySuggested = false;
+    const h = Number(hourly.value);
+    if (h > 0 && (!daily.value || dailySuggested)) { daily.value = Math.round(h * HOURS); dailySuggested = true; }
+    updateHint();
+  });
+  [daily, hourly].forEach((el) => el.addEventListener('keydown', (e) => {
+    if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault();
+  }));
+}
+
+/* ------------------------------------------------------------ Init all questions */
+
+allQuestions.forEach((q) => {
+  const adapter = adapterFor(q);
+  if (adapter.init) adapter.init(q);
+  if (q.type === 'file') initFileQuestion(q);
+  if (q.type === 'languages') initLanguagesQuestion(q);
+  if (q.type === 'country_map') initCountryQuestion(q);
+  if (q.type === 'assignments') initAssignmentsQuestion(q);
+  if (q.type === 'rate_pair') initRatePair(q);
+  if (q.type === 'short_text' && q.source) {
+    const input = document.getElementById(q.id);
+    const list = q.source === 'countries' ? COUNTRIES
+      : q.source === 'nationalities' ? NATIONALITIES
+        : q.source === 'languages' ? LANGUAGES : null;
+    if (input && list) attachAutocomplete(input, list);
+  }
 });
 
-assignmentsList.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-remove]');
-  if (!btn) return;
-  state.assignments.splice(Number(btn.dataset.remove), 1);
-  if (!state.assignments.length) state.assignments.push(emptyAssignment());
-  renderAssignments();
-  saveDraft();
+/* ------------------------------------------------------------ Conditional questions */
+
+function syncConditionals() {
+  allQuestions.forEach((q) => {
+    if (!q.showIf) return;
+    const host = $(`[data-question="${q.id}"]`);
+    if (!host) return;
+    const source = questionById.get(q.showIf.question);
+    const value = source ? adapterFor(source).get(source) : '';
+    const match = Array.isArray(value) ? value.includes(q.showIf.equals) : value === q.showIf.equals;
+    host.hidden = !match;
+  });
+  // "Other" text boxes follow their choice group
+  allQuestions.filter((q) => q.allowOther).forEach((q) => {
+    const box = $(`[data-other-for="${q.id}"]`);
+    if (!box) return;
+    const picked = [...document.querySelectorAll(`input[name="${q.id}"]:checked`)].map((i) => i.value);
+    box.hidden = !picked.includes('Other (specify)');
+  });
+}
+
+form.addEventListener('change', () => { syncConditionals(); saveDraft(); });
+form.addEventListener('input', saveDraft);
+
+form.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  if (e.target.matches('input:not([type="checkbox"]):not([type="radio"]):not([type="file"])')) {
+    e.preventDefault();
+    nextBtn.click();
+  }
 });
-
-addAssignmentBtn.addEventListener('click', () => {
-  if (state.assignments.length >= MAX_ASSIGNMENTS) return;
-  state.assignments.push(emptyAssignment());
-  renderAssignments();
-  const added = document.getElementById(`a-title-${state.assignments.length - 1}`);
-  if (added) added.focus();
-  saveDraft();
-});
-
-function filledAssignments() {
-  return state.assignments.filter((a) => Object.values(a).some((v) => v && v.trim()));
-}
-
-/* "2022-01" → "Jan 2022"; anything unparsable passes through unchanged so a
-   browser without <input type="month"> (which degrades to text) still works. */
-function formatMonth(value) {
-  const m = /^(\d{4})-(\d{2})$/.exec(value || '');
-  if (!m) return value || '';
-  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${names[Number(m[2]) - 1] || ''} ${m[1]}`.trim();
-}
-
-function assignmentPeriod(a) {
-  const from = formatMonth(a.from);
-  const to = formatMonth(a.to);
-  if (from && to) return `${from} – ${to}`;
-  return from || to || '';
-}
-
-function serializeAssignments() {
-  return filledAssignments()
-    .map((a, i) => {
-      const meta = [a.client, a.country, assignmentPeriod(a), a.role].filter(Boolean).join(', ');
-      const head = [a.title || 'Untitled', meta].filter(Boolean).join(' — ');
-      return `${i + 1}. ${head}${a.description ? `\n${a.description}` : ''}`;
-    })
-    .join('\n\n');
-}
-
-renderAssignments();
+form.addEventListener('submit', (e) => e.preventDefault());
 
 /* ------------------------------------------------------------ Validation */
 
-const validators = {
-  1() {
-    const errors = [];
-    if (!getRadio('role')) errors.push(['role', 'Please choose a role.']);
-    if (!getRadio('legalStatus')) errors.push(['legalStatus', 'Please choose a legal status.']);
-    return errors;
-  },
-  2() {
-    const errors = [];
-    if (isFirm() && !getValue('orgName')) errors.push(['orgName', 'Please enter your organization name.']);
-
-    const fullName = getValue('fullName');
-    if (!fullName) errors.push(['fullName', 'Please enter a name.']);
-    else if (!/\p{L}.*\p{L}/u.test(fullName)) errors.push(['fullName', 'Please enter a real name.']);
-
-    const nameLike = (v) => /^\p{L}[\p{L}\s'’.()\-]*$/u.test(v);
-    const nationality = getValue('nationality');
-    if (!nationality) errors.push(['nationality', 'Please enter your nationality.']);
-    else if (!nameLike(nationality)) errors.push(['nationality', 'Please enter a valid nationality, e.g. Kazakhstani.']);
-
-    const country = getValue('countryResidence');
-    if (!country) errors.push(['countryResidence', 'Please enter your country of residence.']);
-    else if (!nameLike(country)) errors.push(['countryResidence', 'Please enter a valid country name.']);
-
-    const email = getValue('email');
-    if (!email) errors.push(['email', 'Please enter your email address.']);
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push(['email', 'That doesn’t look like a valid email address.']);
-
-    const phone = getValue('phone');
-    const phoneDigits = phone.replace(/\D/g, '');
-    if (!phone) errors.push(['phone', 'Please enter your phone number.']);
-    else if (phoneDigits.length < 7 || phoneDigits.length > 15) {
-      errors.push(['phone', 'Please enter a valid phone number, e.g. +7 700 123 4567.']);
-    }
-    return errors;
-  },
-  3() {
-    const errors = [];
-    if (!state.files.cv) errors.push(['cv', 'Please upload your CV.']);
-    return errors;
-  },
-  4() {
-    const errors = [];
-    const chosen = getChecks('expertise');
-    if (!chosen.length) errors.push(['expertise', 'Please select at least one area of expertise.']);
-    if (chosen.includes('Other (specify)') && !getValue('expertiseOther')) {
-      errors.push(['expertiseOther', 'Please specify your other area of expertise.']);
-    }
-    return errors;
-  },
-  5() {
-    const errors = [];
-    if (!getRadio('experience')) errors.push(['experience', 'Please select your years of experience.']);
-    if (!picker.size()) {
-      errors.push(['geography', 'Please select at least one country — click the map, or add a whole region.']);
-    }
-    return errors;
-  },
-  6(opts = {}) {
-    const errors = [];
-    // Adopt any language still sitting in the input box. Skipped on silent
-    // completeness checks so the stepper never mutates what it is measuring.
-    if (!opts.silent && languageInput.value.trim()) {
-      addLanguage(languageInput.value);
-      languageInput.value = '';
-    }
-    if (!state.languages.length) errors.push(['languages', 'Please add at least one language.']);
-    const words = wordCount(getValue('summary'));
-    if (!words) errors.push(['summary', 'Please write a summary of your expertise.']);
-    else if (words < CONFIG.MIN_SUMMARY_WORDS) {
-      errors.push(['summary', `Please write at least ${CONFIG.MIN_SUMMARY_WORDS} words (currently ${words}).`]);
-    }
-    const first = state.assignments[0] || emptyAssignment();
-    if (!first.title.trim() || !first.description.trim()) {
-      errors.push(['assignments', 'Assignment 1 needs at least a project title and a short description.']);
-    }
-    return errors;
-  },
-  7() {
-    return getChecks('availability').length ? [] : [['availability', 'Please select at least one option.']];
-  },
-  8() {
-    const errors = [];
-    const daily = getValue('dailyRate');
-    const hourly = getValue('hourlyRate');
-    if (!daily || Number(daily) <= 0) errors.push(['dailyRate', 'Please enter your daily rate.']);
-    if (!hourly || Number(hourly) <= 0) errors.push(['hourlyRate', 'Please enter your hourly rate.']);
-    return errors;
-  },
-  9() {
-    const errors = [];
-    const prev = getRadio('previousWork');
-    if (!prev) errors.push(['previousWork', 'Please choose an option.']);
-    if (prev === 'Yes' && !getValue('referenceNumber')) {
-      errors.push(['referenceNumber', 'Please provide the assignment reference number.']);
-    }
-    return errors;
-  },
-  10() {
-    const errors = [];
-    if (!form.querySelector('input[name="conflictAgree"]').checked) {
-      errors.push(['conflictAgree', 'You must agree to the conflict of interest declaration to continue.']);
-    }
-    if (!form.querySelector('input[name="dataAgree"]').checked) {
-      errors.push(['dataAgree', 'You must acknowledge the data protection notice to continue.']);
-    }
-    return errors;
-  },
-  11() {
-    return [];
-  },
-};
-
-/* True when a step's own answers are currently valid — used by the step
-   navigator to show ticks. Never mutates state or surfaces error messages. */
-function isStepComplete(step) {
-  const fn = validators[step];
-  return fn ? fn({ silent: true }).length === 0 : false;
+function isQuestionVisible(q) {
+  const host = $(`[data-question="${q.id}"]`);
+  return host ? !host.hidden : true;
 }
 
-function validateStep(step) {
-  const stepEl = steps.get(String(step));
-  clearErrors(stepEl);
-  const errors = (validators[step] || (() => []))();
-  errors.forEach(([key, message]) => showError(key, message));
-  if (errors.length) {
-    const firstAnchor =
-      form.querySelector(`[data-error-anchor="${errors[0][0]}"]`) ||
-      document.getElementById(errors[0][0]);
-    if (firstAnchor) firstAnchor.scrollIntoView({ block: 'center', behavior: prefersReducedMotion.matches ? 'auto' : 'smooth' });
+function validateStep(stepNumber, { silent = false } = {}) {
+  const stepEl = steps.get(String(stepNumber));
+  if (!silent && stepEl) clearErrors(stepEl);
+  const step = schema.steps[stepNumber - 1];
+  if (!step) return true;
+
+  if (!silent) {
+    // adopt any half-typed language before judging the step
+    $$('.chip-field', stepEl).forEach((f) => f.__adopt && f.__adopt());
+  }
+
+  const errors = [];
+  step.questions.forEach((q) => {
+    if (!isQuestionVisible(q)) return;
+    const message = adapterFor(q).validate(q);
+    if (message) errors.push([q.id, message]);
+  });
+
+  if (!silent) {
+    errors.forEach(([key, message]) => showError(key, message));
+    if (errors.length) {
+      const anchor = $(`[data-error-anchor="${errors[0][0]}"]`) || document.getElementById(errors[0][0]);
+      anchor?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion.matches ? 'auto' : 'smooth' });
+    }
   }
   return errors.length === 0;
 }
 
-/* ------------------------------------------------------------ Step navigator */
+const isStepComplete = (n) => (n >= REVIEW_STEP ? false : validateStep(n, { silent: true }));
 
-const STEP_LABELS = [
-  'Type', 'Details', 'Documents', 'Expertise', 'Profile', 'Background',
-  'Availability', 'Rates', 'History', 'Declarations', 'Review',
-];
+function incompleteSteps() {
+  const out = [];
+  for (let n = 1; n < REVIEW_STEP; n++) if (!isStepComplete(n)) out.push(n);
+  return out;
+}
+
+/* ------------------------------------------------------------ Step navigator */
 
 const stepper = $('#stepper');
 const stepperTrack = $('#stepperTrack');
+const TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13l5 5L20 6"/></svg>';
 
-const TICK_SVG =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13l5 5L20 6"/></svg>';
-
-stepperTrack.innerHTML = STEP_LABELS.map(
-  (label, i) => `
+stepperTrack.innerHTML = STEP_LABELS.map((label, i) => `
   <button type="button" class="step-dot" data-step-to="${i + 1}">
     <span class="step-dot-num">${i + 1}</span>
-    <span class="step-dot-label">${label}</span>
-  </button>`
-).join('');
+    <span class="step-dot-label">${escapeHtml(label)}</span>
+  </button>`).join('');
 
 const stepDots = $$('.step-dot', stepperTrack);
 
 function updateStepper() {
-  const current = state.step;
   stepDots.forEach((dot, i) => {
     const n = i + 1;
-    const done = n !== TOTAL_STEPS && isStepComplete(n);
-    dot.classList.toggle('is-current', n === current);
-    dot.classList.toggle('is-done', done && n !== current);
-    dot.setAttribute('aria-current', n === current ? 'step' : 'false');
-    dot.setAttribute(
-      'aria-label',
-      `Step ${n}: ${STEP_LABELS[i]}${done ? ' — complete' : ''}`
-    );
-    const numEl = $('.step-dot-num', dot);
-    numEl.innerHTML = done && n !== current ? TICK_SVG : String(n);
+    const done = n !== REVIEW_STEP && isStepComplete(n);
+    dot.classList.toggle('is-current', n === state.step);
+    dot.classList.toggle('is-done', done && n !== state.step);
+    dot.setAttribute('aria-current', n === state.step ? 'step' : 'false');
+    dot.setAttribute('aria-label', `Step ${n}: ${STEP_LABELS[i]}${done ? ' — complete' : ''}`);
+    $('.step-dot-num', dot).innerHTML = done && n !== state.step ? TICK : String(n);
   });
-
-  const active = stepDots[current - 1];
-  if (active) {
-    const track = stepperTrack;
-    const dotLeft = active.offsetLeft;
-    const dotRight = dotLeft + active.offsetWidth;
-    if (dotLeft < track.scrollLeft + 12) {
-      track.scrollTo({ left: Math.max(0, dotLeft - 24), behavior: prefersReducedMotion.matches ? 'auto' : 'smooth' });
-    } else if (dotRight > track.scrollLeft + track.clientWidth - 12) {
-      track.scrollTo({ left: dotRight - track.clientWidth + 24, behavior: prefersReducedMotion.matches ? 'auto' : 'smooth' });
-    }
-  }
+  const active = stepDots[state.step - 1];
+  if (!active) return;
+  const t = stepperTrack;
+  const left = active.offsetLeft;
+  const right = left + active.offsetWidth;
+  const behavior = prefersReducedMotion.matches ? 'auto' : 'smooth';
+  if (left < t.scrollLeft + 12) t.scrollTo({ left: Math.max(0, left - 24), behavior });
+  else if (right > t.scrollLeft + t.clientWidth - 12) t.scrollTo({ left: right - t.clientWidth + 24, behavior });
 }
 
 stepperTrack.addEventListener('click', (e) => {
   const dot = e.target.closest('[data-step-to]');
-  if (!dot) return;
-  const target = Number(dot.dataset.stepTo);
-  if (target === state.step) return;
-  // Free navigation: jumping never loses answers, and Submit re-checks
-  // every step, so an unfinished step can't slip through.
-  goToStep(target);
+  if (dot && Number(dot.dataset.stepTo) !== state.step) goToStep(Number(dot.dataset.stepTo));
 });
 
 /* ------------------------------------------------------------ Navigation */
 
-function stepKey(step) {
-  if (step === 0) return 'intro';
-  if (step === 12) return 'success';
-  return String(step);
-}
+const stepKey = (n) => (n === 0 ? 'intro' : n === TOTAL_STEPS + 1 ? 'success' : String(n));
 
 function goToStep(next, { animate = true } = {}) {
   const direction = next > state.step ? 'forward' : 'back';
@@ -802,9 +650,7 @@ function goToStep(next, { animate = true } = {}) {
   const target = steps.get(stepKey(next));
   if (!target) return;
 
-  current.hidden = true;
-  current.classList.remove('entering', 'entering-back');
-
+  if (current) { current.hidden = true; current.classList.remove('entering', 'entering-back'); }
   state.step = next;
   target.hidden = false;
 
@@ -817,275 +663,42 @@ function goToStep(next, { animate = true } = {}) {
   const inForm = next >= 1 && next <= TOTAL_STEPS;
   stepNav.hidden = !inForm;
   stepper.hidden = !inForm;
+  nextBtn.textContent = next === REVIEW_STEP ? 'Submit application' : 'Continue';
   backBtn.textContent = 'Back';
-  nextBtn.textContent = next === TOTAL_STEPS ? 'Submit application' : 'Continue';
-  if (inForm) updateStepper();
 
-  const pct = next === 0 ? 0 : next >= 12 ? 100 : Math.round((next / TOTAL_STEPS) * 100);
-  progressFill.style.width = `${pct}%`;
-  stepIndicator.textContent = inForm ? `Step ${next} of ${TOTAL_STEPS}` : next >= 12 ? 'Submitted' : '';
+  progressFill.style.width = `${next === 0 ? 0 : next > TOTAL_STEPS ? 100 : Math.round((next / TOTAL_STEPS) * 100)}%`;
+  stepIndicator.textContent = inForm ? `Step ${next} of ${TOTAL_STEPS}` : next > TOTAL_STEPS ? 'Submitted' : '';
 
   window.scrollTo({ top: 0, behavior: prefersReducedMotion.matches ? 'auto' : 'smooth' });
+  $('.step-title, .success-title', target)?.focus({ preventScroll: true });
 
-  const heading = $('.step-title, .success-title', target);
-  if (heading) heading.focus({ preventScroll: true });
-
-  if (next === 2) syncLegalStatusUI();
-  if (next === 6) growAllAssignments(); // now visible, so it can be measured
-  if (next === TOTAL_STEPS) renderReview();
+  if (inForm) {
+    updateStepper();
+    $$('.assignment-text', target).forEach(autoGrow);
+  }
+  if (next === REVIEW_STEP) renderReview();
 }
 
-[startBtn, $('#startBtn2'), $('#startBtn3')].filter(Boolean).forEach((btn) =>
-  btn.addEventListener('click', () => goToStep(1))
-);
+[$('#startBtn'), $('#startBtn2'), $('#startBtn3')].filter(Boolean)
+  .forEach((btn) => btn.addEventListener('click', () => goToStep(1)));
 
-backBtn.addEventListener('click', () => {
-  if (state.step > 1) goToStep(state.step - 1);
-  else goToStep(0);
-});
+backBtn.addEventListener('click', () => goToStep(state.step > 1 ? state.step - 1 : 0));
 
 nextBtn.addEventListener('click', () => {
   if (!validateStep(state.step)) return;
-  if (state.step === TOTAL_STEPS) {
-    submitApplication();
-  } else {
-    goToStep(state.step + 1);
-  }
+  if (state.step === REVIEW_STEP) submitApplication();
+  else goToStep(state.step + 1);
 });
 
-form.addEventListener('submit', (e) => e.preventDefault());
+/* ------------------------------------------------------------ Answers & drafts */
 
-// Enter in a single-line input advances the step (textareas keep Enter for newlines;
-// comboboxes and the language input consume Enter themselves when relevant)
-form.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter') return;
-  if (e.target.matches('input:not([type="checkbox"]):not([type="radio"]):not([type="file"])')) {
-    e.preventDefault();
-    nextBtn.click();
-  }
-});
-
-/* ------------------------------------------------------------ Conditional fields */
-
-function syncLegalStatusUI() {
-  const firm = isFirm();
-  $('#orgNameField').hidden = !firm;
-  $('#fullNameLabel').innerHTML = firm
-    ? 'Contact Person <span class="req" aria-hidden="true">*</span>'
-    : 'Full Name <span class="req" aria-hidden="true">*</span>';
-}
-
-form.addEventListener('change', (e) => {
-  const { name, value } = e.target;
-
-  if (name === 'legalStatus') syncLegalStatusUI();
-
-  if (name === 'expertise') {
-    $('#expertiseOtherField').hidden = !getChecks('expertise').includes('Other (specify)');
-  }
-
-  if (name === 'previousWork') {
-    $('#referenceField').hidden = value !== 'Yes';
-  }
-
-  saveDraft();
-});
-
-/* ------------------------------------------------------------ Word counter */
-
-const summaryEl = $('#summary');
-const summaryCounter = $('#summaryCounter');
-
-summaryEl.addEventListener('input', () => {
-  const words = wordCount(summaryEl.value);
-  summaryCounter.textContent = `${words} / ${CONFIG.MIN_SUMMARY_WORDS} words`;
-  summaryCounter.classList.toggle('ok', words >= CONFIG.MIN_SUMMARY_WORDS);
-});
-
-/* ------------------------------------------------------------ Input sanitizers */
-
-// Phone: only digits, one leading +, spaces, parentheses, dashes — letters never appear
-const phoneEl = $('#phone');
-phoneEl.addEventListener('input', () => {
-  const cleaned = phoneEl.value
-    .replace(/[^\d+()\-\s]/g, '')
-    .replace(/(?!^)\+/g, ''); // + allowed only as the first character
-  if (cleaned !== phoneEl.value) {
-    const pos = phoneEl.selectionStart - (phoneEl.value.length - cleaned.length);
-    phoneEl.value = cleaned;
-    phoneEl.setSelectionRange(Math.max(0, pos), Math.max(0, pos));
-  }
-});
-
-// Live "valid" affordance on email as you type
-const emailEl = $('#email');
-emailEl.addEventListener('input', () => {
-  if (emailEl.getAttribute('aria-invalid') && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailEl.value.trim())) {
-    emailEl.removeAttribute('aria-invalid');
-    const errEl = form.querySelector('[data-error-for="email"]');
-    if (errEl) errEl.hidden = true;
-  }
-});
-
-/* ------------------------------------------------------------ Rate helper */
-
-const dailyRateEl = $('#dailyRate');
-const hourlyRateEl = $('#hourlyRate');
-const rateHint = $('#rateHint');
-
-const HOURS_PER_DAY = 8;
-
-// Track which field we filled in, so a suggestion can be refined later but a
-// number the applicant typed themselves is never overwritten.
-let dailyIsSuggested = false;
-let hourlyIsSuggested = false;
-
-function updateRateHint() {
-  const daily = Number(dailyRateEl.value);
-  const hourly = Number(hourlyRateEl.value);
-  if (daily > 0 && hourly > 0) {
-    const suggested = dailyIsSuggested || hourlyIsSuggested;
-    rateHint.textContent = suggested
-      ? `Based on an ${HOURS_PER_DAY}-hour day we filled in the other rate — edit it if your rate differs.`
-      : `That works out to ${(daily / hourly).toFixed(1)} hours per day.`;
-    rateHint.hidden = false;
-  } else {
-    rateHint.hidden = true;
-  }
-}
-
-dailyRateEl.addEventListener('input', () => {
-  dailyIsSuggested = false;
-  const daily = Number(dailyRateEl.value);
-  if (daily > 0 && (!hourlyRateEl.value || hourlyIsSuggested)) {
-    hourlyRateEl.value = Math.round(daily / HOURS_PER_DAY);
-    hourlyIsSuggested = true;
-  }
-  updateRateHint();
-});
-
-hourlyRateEl.addEventListener('input', () => {
-  hourlyIsSuggested = false;
-  const hourly = Number(hourlyRateEl.value);
-  if (hourly > 0 && (!dailyRateEl.value || dailyIsSuggested)) {
-    dailyRateEl.value = Math.round(hourly * HOURS_PER_DAY);
-    dailyIsSuggested = true;
-  }
-  updateRateHint();
-});
-
-// Number fields: block exponent/sign keys so only digits (and a dot) can be typed
-[dailyRateEl, hourlyRateEl].forEach((el) =>
-  el.addEventListener('keydown', (e) => {
-    if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault();
-  })
-);
-
-/* ------------------------------------------------------------ File uploads */
-
-$$('.dropzone').forEach((zone) => {
-  const key = zone.dataset.fileKey;
-  const input = $('input[type="file"]', zone);
-  const empty = $('.dropzone-empty', zone);
-  const chip = $('.file-chip', zone);
-  const nameEl = $('.file-chip-name', zone);
-  const sizeEl = $('.file-chip-size', zone);
-  const removeBtn = $('.file-chip-remove', zone);
-
-  function render() {
-    const file = state.files[key];
-    empty.hidden = !!file;
-    chip.hidden = !file;
-    zone.classList.toggle('has-file', !!file);
-    if (file) {
-      nameEl.textContent = file.name;
-      sizeEl.textContent = formatBytes(file.size);
-    }
-  }
-
-  function accept(file) {
-    const errEl = form.querySelector(`[data-error-for="${key}"]`);
-    if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
-    if (!file) return;
-    if (file.size > CONFIG.MAX_FILE_BYTES) {
-      showError(key, `"${file.name}" is ${formatBytes(file.size)} — the limit is 10 MB.`);
-      return;
-    }
-    state.files[key] = file;
-    render();
-  }
-
-  zone.addEventListener('click', (e) => {
-    if (e.target.closest('.file-chip-remove')) return;
-    if (!state.files[key]) input.click();
+function collectAnswers() {
+  const answers = {};
+  allQuestions.forEach((q) => {
+    if (q.type === 'file') return;
+    answers[q.id] = adapterFor(q).get(q);
   });
-
-  zone.addEventListener('keydown', (e) => {
-    if ((e.key === 'Enter' || e.key === ' ') && !state.files[key]) {
-      e.preventDefault();
-      input.click();
-    }
-  });
-
-  input.addEventListener('change', () => {
-    accept(input.files[0]);
-    input.value = '';
-  });
-
-  ['dragenter', 'dragover'].forEach((evt) =>
-    zone.addEventListener(evt, (e) => {
-      e.preventDefault();
-      zone.classList.add('dragover');
-    })
-  );
-
-  ['dragleave', 'drop'].forEach((evt) =>
-    zone.addEventListener(evt, (e) => {
-      e.preventDefault();
-      zone.classList.remove('dragover');
-    })
-  );
-
-  zone.addEventListener('drop', (e) => {
-    accept(e.dataTransfer.files[0]);
-  });
-
-  removeBtn.addEventListener('click', () => {
-    state.files[key] = null;
-    render();
-  });
-});
-
-/* ------------------------------------------------------------ Draft persistence (no files) */
-
-function collectTextState() {
-  const geo = picker.getSelection();
-  return {
-    role: getRadio('role'),
-    legalStatus: getRadio('legalStatus'),
-    orgName: getValue('orgName'),
-    fullName: getValue('fullName'),
-    nationality: getValue('nationality'),
-    countryResidence: getValue('countryResidence'),
-    email: getValue('email'),
-    phone: getValue('phone'),
-    expertise: getChecks('expertise'),
-    expertiseOther: getValue('expertiseOther'),
-    experience: getRadio('experience'),
-    geography: geo.regions,
-    countries: geo.names,
-    countryCodes: geo.ids,
-    languages: serializeLanguages(),
-    summary: getValue('summary'),
-    assignments: serializeAssignments(),
-    availability: getChecks('availability'),
-    dailyRate: getValue('dailyRate'),
-    hourlyRate: getValue('hourlyRate'),
-    previousWork: getRadio('previousWork'),
-    referenceNumber: getValue('referenceNumber'),
-    conflictAgree: form.querySelector('input[name="conflictAgree"]').checked,
-    dataAgree: form.querySelector('input[name="dataAgree"]').checked,
-  };
+  return answers;
 }
 
 let draftTimer = null;
@@ -1093,213 +706,81 @@ function saveDraft() {
   if (state.step >= 1 && state.step <= TOTAL_STEPS) updateStepper();
   clearTimeout(draftTimer);
   draftTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(
-        DRAFT_KEY,
-        JSON.stringify({
-          ...collectTextState(),
-          languagesList: state.languages,
-          assignmentsList: state.assignments,
-        })
-      );
-    } catch (_) { /* storage unavailable — ignore */ }
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(collectAnswers())); } catch (_) { /* ignore */ }
   }, 400);
 }
 
-form.addEventListener('input', saveDraft);
-
 function restoreDraft() {
   let draft;
-  try {
-    draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
-  } catch (_) {
-    return;
-  }
+  try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch (_) { return; }
   if (!draft) return;
-
-  const setRadio = (name, value) => {
-    if (!value) return;
-    const el = [...form.querySelectorAll(`input[name="${name}"]`)].find((i) => i.value === value);
-    if (el) el.checked = true;
-  };
-  const setChecks = (name, values = []) => values.forEach((value) => setRadio(name, value));
-  const setText = (id, value) => {
-    const el = document.getElementById(id);
-    if (el && value != null) el.value = value;
-  };
-
-  setRadio('role', draft.role);
-  setRadio('legalStatus', draft.legalStatus);
-  setText('orgName', draft.orgName);
-  setText('fullName', draft.fullName);
-  setText('nationality', draft.nationality);
-  setText('countryResidence', draft.countryResidence);
-  setText('email', draft.email);
-  setText('phone', draft.phone);
-  setChecks('expertise', draft.expertise);
-  setText('expertiseOther', draft.expertiseOther);
-  setRadio('experience', draft.experience);
-  setText('summary', draft.summary);
-  setChecks('availability', draft.availability);
-  setText('dailyRate', draft.dailyRate);
-  setText('hourlyRate', draft.hourlyRate);
-  setRadio('previousWork', draft.previousWork);
-  setText('referenceNumber', draft.referenceNumber);
-  if (draft.conflictAgree) form.querySelector('input[name="conflictAgree"]').checked = true;
-  if (draft.dataAgree) form.querySelector('input[name="dataAgree"]').checked = true;
-
-  if (Array.isArray(draft.languagesList)) {
-    state.languages = draft.languagesList.filter((l) => l && l.name);
-    renderLanguageChips();
-  }
-  if (Array.isArray(draft.countryCodes)) {
-    picker.setSelection(draft.countryCodes);
-    renderPickerState();
-  }
-  if (Array.isArray(draft.assignmentsList) && draft.assignmentsList.length) {
-    state.assignments = draft.assignmentsList
-      .slice(0, MAX_ASSIGNMENTS)
-      .map((a) =>
-        // Older drafts stored one free-text block per assignment; keep the
-        // text by dropping it into the description field.
-        typeof a === 'string'
-          ? { ...emptyAssignment(), description: a }
-          : { ...emptyAssignment(), ...a }
-      );
-    renderAssignments();
-  }
-
-  syncLegalStatusUI();
-  $('#expertiseOtherField').hidden = !(draft.expertise || []).includes('Other (specify)');
-  $('#referenceField').hidden = draft.previousWork !== 'Yes';
-  summaryEl.dispatchEvent(new Event('input'));
-  updateRateHint();
+  allQuestions.forEach((q) => {
+    if (q.type === 'file' || !(q.id in draft)) return;
+    try { adapterFor(q).set(q, draft[q.id]); } catch (_) { /* skip incompatible */ }
+  });
+  syncConditionals();
 }
 
 restoreDraft();
+syncConditionals();
 
 /* ------------------------------------------------------------ Review */
 
-/* With free step navigation, a step can be skipped entirely — collect them
-   so Review can flag them and Submit can refuse. */
-function incompleteSteps() {
-  const out = [];
-  for (let n = 1; n < TOTAL_STEPS; n++) if (!isStepComplete(n)) out.push(n);
-  return out;
+function answerSummary(q) {
+  const v = adapterFor(q).get(q);
+  if (q.type === 'file') {
+    const f = window.__formFiles[q.id];
+    return f ? `${f.name} (${formatBytes(f.size)})` : '—';
+  }
+  if (q.type === 'country_map') {
+    return v.ids.length ? `${v.ids.length} selected — ${truncate(v.names.join(', '), 160)}` : '—';
+  }
+  if (q.type === 'languages') {
+    return v.length ? v.map((l) => `${l.name} (${l.level})`).join(', ') : '—';
+  }
+  if (q.type === 'assignments') {
+    const filled = v.filter((a) => Object.values(a).some((x) => x && x.trim()));
+    return filled.length
+      ? filled.map((a) => truncate([a.title || 'Untitled', a.client].filter(Boolean).join(' — '), 90)).join('\n')
+      : '—';
+  }
+  if (q.type === 'rate_pair') {
+    return v.daily || v.hourly ? `€${v.daily || '—'} / day · €${v.hourly || '—'} / hour` : '—';
+  }
+  if (q.type === 'paragraph' && q.minWords) {
+    return v ? `${v.split(/\s+/).filter(Boolean).length} words` : '—';
+  }
+  if (Array.isArray(v)) return v.join('\n') || '—';
+  return v || '—';
 }
 
 function renderReview() {
-  const data = collectTextState();
-  const fileLabel = (key) =>
-    state.files[key] ? `${state.files[key].name} (${formatBytes(state.files[key].size)})` : null;
-
-  const groups = [
-    {
-      title: 'Application Type', step: 1,
-      rows: [
-        ['Role', data.role],
-        ['Legal status', data.legalStatus],
-      ],
-    },
-    {
-      title: 'General Information', step: 2,
-      rows: [
-        ...(isFirm() ? [['Organization', data.orgName]] : []),
-        [isFirm() ? 'Contact person' : 'Full name', data.fullName],
-        ['Nationality', data.nationality],
-        ['Country of residence', data.countryResidence],
-        ['Email', data.email],
-        ['Phone', data.phone],
-      ],
-    },
-    {
-      title: 'Documents', step: 3,
-      rows: [
-        ['CV', fileLabel('cv')],
-        ['Certifications', fileLabel('certifications') || '—'],
-        ['Publications', fileLabel('publications') || '—'],
-      ],
-    },
-    {
-      title: 'Expertise', step: 4,
-      rows: [
-        ['Areas', data.expertise.filter((v) => v !== 'Other (specify)').join('\n') || '—'],
-        ...(data.expertiseOther ? [['Other', data.expertiseOther]] : []),
-      ],
-    },
-    {
-      title: 'Technical Profile', step: 5,
-      rows: [
-        ['Experience', data.experience],
-        ['Regions', data.geography.join('\n') || '—'],
-        ['Countries', data.countries.length
-          ? `${data.countries.length} selected — ${truncate(data.countries.join(', '), 160)}`
-          : '—'],
-      ],
-    },
-    {
-      title: 'Professional Background', step: 6,
-      rows: [
-        ['Languages', data.languages],
-        ['Summary', `${wordCount(data.summary)} words`],
-        ['Key assignments', filledAssignments().map((a) => {
-          const meta = [a.client, assignmentPeriod(a)].filter(Boolean).join(', ');
-          return truncate([a.title || 'Untitled', meta].filter(Boolean).join(' — '), 90);
-        }).join('\n') || '—'],
-      ],
-    },
-    {
-      title: 'Availability & Rates', step: 7,
-      rows: [
-        ['Availability', data.availability.join('\n')],
-        ['Daily rate', data.dailyRate ? `€${data.dailyRate} / day` : ''],
-        ['Hourly rate', data.hourlyRate ? `€${data.hourlyRate} / hour` : ''],
-      ],
-    },
-    {
-      title: 'Previous Collaboration', step: 9,
-      rows: [
-        ['Worked with ISTC', data.previousWork],
-        ...(data.previousWork === 'Yes' ? [['Reference number', data.referenceNumber]] : []),
-      ],
-    },
-  ];
-
   const missing = incompleteSteps();
-  const banner = missing.length
-    ? `<div class="review-warn">
-         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9"/></svg>
-         <div>
-           <strong>${missing.length} ${missing.length === 1 ? 'step still needs' : 'steps still need'} an answer</strong>
-           <p>${missing.map((n) => `<button type="button" class="review-warn-link" data-goto="${n}">${n}. ${escapeHtml(STEP_LABELS[n - 1])}</button>`).join('')}</p>
-         </div>
-       </div>`
-    : '';
+  const banner = missing.length ? `
+    <div class="review-warn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9"/></svg>
+      <div>
+        <strong>${missing.length} ${missing.length === 1 ? 'step still needs' : 'steps still need'} an answer</strong>
+        <p>${missing.map((n) => `<button type="button" class="review-warn-link" data-goto="${n}">${n}. ${escapeHtml(STEP_LABELS[n - 1])}</button>`).join('')}</p>
+      </div>
+    </div>` : '';
 
-  $('#reviewContent').innerHTML = banner + groups
-    .map(
-      (group) => `
-      <div class="review-group">
-        <div class="review-group-head">
-          <span class="review-group-title">${group.title}</span>
-          <button type="button" class="review-edit" data-goto="${group.step}">Edit</button>
-        </div>
-        ${group.rows
-          .map(
-            ([key, value]) => `
-          <div class="review-row">
-            <span class="review-key">${escapeHtml(key)}</span>
-            <span class="review-val${value === '—' ? ' muted' : ''}">${escapeHtml(value || '—')}</span>
-          </div>`
-          )
-          .join('')}
-      </div>`
-    )
-    .join('');
+  const groups = schema.steps.map((step, i) => `
+    <div class="review-group">
+      <div class="review-group-head">
+        <span class="review-group-title">${escapeHtml(step.title)}</span>
+        <button type="button" class="review-edit" data-goto="${i + 1}">Edit</button>
+      </div>
+      ${step.questions.filter(isQuestionVisible).map((q) => `
+        <div class="review-row">
+          <span class="review-key">${escapeHtml(q.title)}</span>
+          <span class="review-val">${escapeHtml(answerSummary(q))}</span>
+        </div>`).join('')}
+    </div>`).join('');
 
+  $('#reviewContent').innerHTML = banner + groups;
   $$('#reviewContent [data-goto]').forEach((btn) =>
-    btn.addEventListener('click', () => goToStep(Number(btn.dataset.goto)))
-  );
+    btn.addEventListener('click', () => goToStep(Number(btn.dataset.goto))));
 }
 
 /* ------------------------------------------------------------ Submission */
@@ -1307,47 +788,36 @@ function renderReview() {
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      resolve(String(reader.result).split(',')[1] || '');
-    };
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
 }
 
 async function buildPayload() {
-  const data = collectTextState();
   const files = {};
-  for (const key of ['cv', 'certifications', 'publications']) {
-    const file = state.files[key];
+  for (const q of allQuestions.filter((x) => x.type === 'file')) {
+    const file = window.__formFiles[q.id];
     if (file) {
-      files[key] = {
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        data: await fileToBase64(file),
-      };
+      files[q.id] = { name: file.name, type: file.type, size: file.size, data: await fileToBase64(file) };
     }
   }
-  return { ...data, files, submittedAt: new Date().toISOString() };
+  const answers = allQuestions
+    .filter((q) => q.type !== 'file' && isQuestionVisible(q))
+    .map((q) => ({ id: q.id, title: q.title, value: answerSummary(q) }));
+  return { schemaVersion: schema.version, answers, raw: collectAnswers(), files, submittedAt: new Date().toISOString() };
 }
 
 async function submitApplication() {
   const errEl = $('#submitError');
   errEl.hidden = true;
 
-  // Steps are freely navigable, so re-check them all before sending.
   const missing = incompleteSteps();
-  if (missing.length) {
-    goToStep(missing[0]);
-    validateStep(missing[0]);
-    return;
-  }
+  if (missing.length) { goToStep(missing[0]); validateStep(missing[0]); return; }
 
   if (!CONFIG.SUBMIT_URL) {
-    errEl.textContent =
-      'Submissions are not open yet — the form is not connected to a submission service. ' +
-      'Please try again later or contact consulting.tenders@istc.int.';
+    errEl.textContent = 'Submissions are not open yet — the form is not connected to a submission service. '
+      + 'Please try again later or contact consulting.tenders@istc.int.';
     errEl.hidden = false;
     return;
   }
@@ -1357,21 +827,13 @@ async function submitApplication() {
   nextBtn.innerHTML = '<span class="spinner" aria-hidden="true"></span>Submitting…';
 
   try {
-    const payload = await buildPayload();
-    const response = await fetch(CONFIG.SUBMIT_URL, {
-      method: 'POST',
-      body: JSON.stringify(payload), // no Content-Type header → simple request, no CORS preflight
-    });
+    const response = await fetch(CONFIG.SUBMIT_URL, { method: 'POST', body: JSON.stringify(await buildPayload()) });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.ok === false) {
-      throw new Error(result.error || `Server responded with ${response.status}`);
-    }
+    if (!response.ok || result.ok === false) throw new Error(result.error || `Server responded with ${response.status}`);
     try { localStorage.removeItem(DRAFT_KEY); } catch (_) { /* ignore */ }
-    goToStep(12);
+    goToStep(TOTAL_STEPS + 1);
   } catch (err) {
-    errEl.textContent =
-      'Something went wrong while submitting. Please check your connection and try again. ' +
-      `(${err.message})`;
+    errEl.textContent = `Something went wrong while submitting. Please check your connection and try again. (${err.message})`;
     errEl.hidden = false;
   } finally {
     nextBtn.disabled = false;
@@ -1379,5 +841,3 @@ async function submitApplication() {
     nextBtn.textContent = 'Submit application';
   }
 }
-
-/* The sticky-header hairline lives in landing.js, which owns scroll behaviour. */

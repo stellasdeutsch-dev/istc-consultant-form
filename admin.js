@@ -1,0 +1,556 @@
+/* ============================================================
+   Form editor — a Google-Forms-style builder for schema.js.
+   Sections, questions, types, options, required, validation,
+   drag reorder, preview, import/export.
+   ============================================================ */
+
+'use strict';
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+let schema = loadSchema();
+let activeSection = 0;
+
+const esc2 = (v) => String(v ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/* ------------------------------------------------------------ theme */
+
+const themeToggle = $('#themeToggle');
+themeToggle.addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem('istc-theme', next); } catch (_) { /* ignore */ }
+});
+
+/* ------------------------------------------------------------ persistence */
+
+let savedTimer = null;
+function persist() {
+  saveSchema(schema);
+  const badge = $('#savedState');
+  badge.textContent = 'Saved';
+  badge.classList.add('is-on');
+  clearTimeout(savedTimer);
+  savedTimer = setTimeout(() => badge.classList.remove('is-on'), 1600);
+}
+
+/* ------------------------------------------------------------ sections */
+
+function renderSectionList() {
+  $('#sectionList').innerHTML = schema.steps.map((s, i) => `
+    <li class="section-item${i === activeSection ? ' is-active' : ''}" data-section="${i}" draggable="true">
+      <span class="section-num">${i + 1}</span>
+      <span class="section-name">${esc2(s.title || 'Untitled section')}</span>
+      <span class="section-count">${s.questions.length}</span>
+      <span class="section-tools">
+        <button type="button" class="mini" data-dup-section="${i}" title="Duplicate">⧉</button>
+        <button type="button" class="mini mini-danger" data-del-section="${i}" title="Delete">×</button>
+      </span>
+    </li>`).join('');
+}
+
+$('#sectionList').addEventListener('click', (e) => {
+  const dup = e.target.closest('[data-dup-section]');
+  const del = e.target.closest('[data-del-section]');
+  const item = e.target.closest('[data-section]');
+
+  if (dup) {
+    const i = Number(dup.dataset.dupSection);
+    const copy = deepClone(schema.steps[i]);
+    copy.id = `${copy.id}_copy_${Date.now().toString(36)}`;
+    copy.title = `${copy.title} (copy)`;
+    copy.questions.forEach((q) => { q.id = `${q.id}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`; });
+    schema.steps.splice(i + 1, 0, copy);
+    activeSection = i + 1;
+    return renderAll();
+  }
+  if (del) {
+    const i = Number(del.dataset.delSection);
+    if (schema.steps.length === 1) return alert('A form needs at least one section.');
+    if (!confirm(`Delete section “${schema.steps[i].title}” and its ${schema.steps[i].questions.length} question(s)?`)) return;
+    schema.steps.splice(i, 1);
+    activeSection = Math.max(0, Math.min(activeSection, schema.steps.length - 1));
+    return renderAll();
+  }
+  if (item) { activeSection = Number(item.dataset.section); renderAll(); }
+});
+
+$('#addSectionBtn').addEventListener('click', () => {
+  schema.steps.push(newStep());
+  activeSection = schema.steps.length - 1;
+  renderAll();
+});
+
+/* Drag to reorder sections */
+let dragSection = null;
+$('#sectionList').addEventListener('dragstart', (e) => {
+  const item = e.target.closest('[data-section]');
+  if (!item) return;
+  dragSection = Number(item.dataset.section);
+  item.classList.add('dragging');
+});
+$('#sectionList').addEventListener('dragend', (e) => {
+  e.target.closest('[data-section]')?.classList.remove('dragging');
+  dragSection = null;
+});
+$('#sectionList').addEventListener('dragover', (e) => {
+  e.preventDefault();
+  const over = e.target.closest('[data-section]');
+  if (!over || dragSection == null) return;
+  const to = Number(over.dataset.section);
+  if (to === dragSection) return;
+  const [moved] = schema.steps.splice(dragSection, 1);
+  schema.steps.splice(to, 0, moved);
+  activeSection = to;
+  dragSection = to;
+  renderAll();
+});
+
+/* ------------------------------------------------------------ section header fields */
+
+function bindSectionField(id, key) {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => {
+    schema.steps[activeSection][key] = el.value;
+    if (key === 'title') renderSectionList();
+    persist();
+  });
+}
+
+bindSectionField('sectionTitle', 'title');
+bindSectionField('sectionSubtitle', 'subtitle');
+bindSectionField('sectionNav', 'navLabel');
+
+$('#sectionIcon').innerHTML = Object.keys(ICONS)
+  .map((n) => `<option value="${n}">${n}</option>`).join('');
+$('#sectionIcon').addEventListener('change', () => {
+  schema.steps[activeSection].icon = $('#sectionIcon').value;
+  persist();
+});
+
+$('#formTitle').addEventListener('input', () => { schema.title = $('#formTitle').value; persist(); });
+$('#formDesc').addEventListener('input', () => { schema.description = $('#formDesc').value; persist(); });
+
+/* ------------------------------------------------------------ questions */
+
+function typeOptions(selected) {
+  return Object.entries(QUESTION_TYPES)
+    .map(([key, meta]) => `<option value="${key}"${key === selected ? ' selected' : ''}>${meta.label}</option>`)
+    .join('');
+}
+
+function optionRows(q, qi) {
+  return (q.options || []).map((o, oi) => `
+    <div class="opt-row" draggable="true" data-q="${qi}" data-opt="${oi}">
+      <span class="opt-grip" aria-hidden="true">⠿</span>
+      <span class="opt-marker${q.type === 'checkbox' ? ' square' : ''}" aria-hidden="true"></span>
+      <input class="admin-input opt-input" data-q="${qi}" data-opt="${oi}" data-k="label"
+             value="${esc2(o.label ?? o.value)}" placeholder="Option ${oi + 1}" />
+      <input class="admin-input opt-input opt-desc" data-q="${qi}" data-opt="${oi}" data-k="desc"
+             value="${esc2(o.desc || '')}" placeholder="Description (optional)" />
+      <select class="admin-input opt-icon" data-q="${qi}" data-opt="${oi}" data-k="icon">
+        <option value="">no icon</option>
+        ${Object.keys(ICONS).map((n) => `<option value="${n}"${o.icon === n ? ' selected' : ''}>${n}</option>`).join('')}
+      </select>
+      <button type="button" class="mini mini-danger" data-del-opt="${oi}" data-q="${qi}" title="Remove option">×</button>
+    </div>`).join('');
+}
+
+function settingRow(label, control) {
+  return `<label class="setting"><span>${label}</span>${control}</label>`;
+}
+
+function questionSettings(q, qi) {
+  const fields = QUESTION_TYPES[q.type]?.fields || [];
+  const bits = [];
+
+  if (fields.includes('placeholder')) {
+    bits.push(settingRow('Placeholder',
+      `<input class="admin-input" data-q="${qi}" data-set="placeholder" value="${esc2(q.placeholder || '')}" />`));
+  }
+  if (fields.includes('minWords')) {
+    bits.push(settingRow('Minimum words',
+      `<input class="admin-input" type="number" min="0" data-q="${qi}" data-set="minWords" value="${esc2(q.minWords || '')}" />`));
+  }
+  if (fields.includes('source')) {
+    bits.push(settingRow('Autocomplete list',
+      `<select class="admin-input" data-q="${qi}" data-set="source">
+         <option value="">none</option>
+         ${['countries', 'nationalities', 'languages'].map((s) => `<option value="${s}"${q.source === s ? ' selected' : ''}>${s}</option>`).join('')}
+       </select>`));
+  }
+  if (fields.includes('pattern')) {
+    bits.push(settingRow('Text rule',
+      `<select class="admin-input" data-q="${qi}" data-set="pattern">
+         <option value="">any text</option>
+         <option value="name"${q.pattern === 'name' ? ' selected' : ''}>looks like a name</option>
+         <option value="letters"${q.pattern === 'letters' ? ' selected' : ''}>letters only</option>
+       </select>`));
+  }
+  if (fields.includes('layout')) {
+    bits.push(settingRow('Layout',
+      `<select class="admin-input" data-q="${qi}" data-set="layout">
+         <option value="">stacked</option>
+         <option value="row"${q.layout === 'row' ? ' selected' : ''}>side by side</option>
+         <option value="grid"${q.layout === 'grid' ? ' selected' : ''}>two-column grid</option>
+       </select>`));
+  }
+  if (fields.includes('allowOther')) {
+    bits.push(settingRow('“Other” option',
+      `<input type="checkbox" data-q="${qi}" data-set="allowOther"${q.allowOther ? ' checked' : ''} />`));
+  }
+  if (fields.includes('maxMB')) {
+    bits.push(settingRow('Max file size (MB)',
+      `<input class="admin-input" type="number" min="1" data-q="${qi}" data-set="maxMB" value="${esc2(q.maxMB || 10)}" />`));
+  }
+  if (fields.includes('accept')) {
+    bits.push(settingRow('Accepted types',
+      `<input class="admin-input" data-q="${qi}" data-set="accept" value="${esc2(q.accept || '')}" placeholder=".pdf,.docx" />`));
+  }
+  if (fields.includes('maxItems')) {
+    bits.push(settingRow('Maximum entries',
+      `<input class="admin-input" type="number" min="1" max="10" data-q="${qi}" data-set="maxItems" value="${esc2(q.maxItems || 3)}" />`));
+  }
+  if (fields.includes('prefix')) {
+    bits.push(settingRow('Prefix', `<input class="admin-input" data-q="${qi}" data-set="prefix" value="${esc2(q.prefix || '')}" />`));
+    bits.push(settingRow('Suffix', `<input class="admin-input" data-q="${qi}" data-set="suffix" value="${esc2(q.suffix || '')}" />`));
+  }
+  if (fields.includes('body')) {
+    bits.push(`<label class="setting setting-wide"><span>Statement text</span>
+      <textarea class="admin-input" rows="4" data-q="${qi}" data-set="body">${esc2(q.body || '')}</textarea></label>`);
+    bits.push(settingRow('Consent label',
+      `<input class="admin-input" data-q="${qi}" data-set="consentLabel" value="${esc2(q.consentLabel || 'I agree')}" />`));
+  }
+
+  bits.push(settingRow('Half width',
+    `<input type="checkbox" data-q="${qi}" data-set="half"${q.half ? ' checked' : ''} />`));
+  bits.push(settingRow('Hide the question title',
+    `<input type="checkbox" data-q="${qi}" data-set="hideTitle"${q.hideTitle ? ' checked' : ''} />`));
+
+  // Conditional display
+  const others = schema.steps.flatMap((s) => s.questions)
+    .filter((o) => o.id !== q.id && ['radio', 'checkbox', 'dropdown', 'scale'].includes(o.type));
+  bits.push(settingRow('Show only if',
+    `<select class="admin-input" data-q="${qi}" data-set="showIfQuestion">
+       <option value="">always show</option>
+       ${others.map((o) => `<option value="${esc2(o.id)}"${q.showIf?.question === o.id ? ' selected' : ''}>${esc2(o.title)}</option>`).join('')}
+     </select>`));
+  if (q.showIf?.question) {
+    const src = others.find((o) => o.id === q.showIf.question);
+    bits.push(settingRow('…equals',
+      `<select class="admin-input" data-q="${qi}" data-set="showIfEquals">
+         ${(src?.options || []).map((o) => `<option value="${esc2(o.value)}"${q.showIf.equals === o.value ? ' selected' : ''}>${esc2(o.label ?? o.value)}</option>`).join('')}
+       </select>`));
+  }
+
+  return `<div class="q-settings">${bits.join('')}</div>`;
+}
+
+function renderQuestions() {
+  const step = schema.steps[activeSection];
+  $('#questionList').innerHTML = step.questions.map((q, qi) => {
+    const meta = QUESTION_TYPES[q.type] || QUESTION_TYPES.short_text;
+    const hasOptions = (QUESTION_TYPES[q.type]?.fields || []).includes('options');
+    return `
+      <article class="q-card${q.__open ? ' is-open' : ''}" data-q="${qi}" draggable="true">
+        <div class="q-grip" aria-hidden="true">⠿</div>
+
+        <div class="q-main">
+          <div class="q-top">
+            <input class="admin-input q-title" data-q="${qi}" data-set="title"
+                   value="${esc2(q.title)}" placeholder="Question" />
+            <select class="admin-input q-type" data-q="${qi}" data-type-select>
+              ${typeOptions(q.type)}
+            </select>
+          </div>
+
+          <input class="admin-input q-help" data-q="${qi}" data-set="help"
+                 value="${esc2(q.help || '')}" placeholder="Help text shown under the question (optional)" />
+
+          ${hasOptions ? `
+            <div class="opt-list" data-optlist="${qi}">${optionRows(q, qi)}</div>
+            <button type="button" class="admin-add admin-add-sm" data-add-opt="${qi}">
+              <span aria-hidden="true">+</span> Add option
+            </button>` : `
+            <p class="q-native">${esc2(meta.label)} — rendered by the form's built-in widget.</p>`}
+
+          ${q.__open ? questionSettings(q, qi) : ''}
+
+          <div class="q-foot">
+            <label class="q-required">
+              <input type="checkbox" data-q="${qi}" data-set="required"${q.required ? ' checked' : ''} />
+              <span>Required</span>
+            </label>
+            <span class="q-id">id: <code>${esc2(q.id)}</code></span>
+            <span class="q-foot-tools">
+              <button type="button" class="mini" data-toggle-settings="${qi}">${q.__open ? 'Hide settings' : 'Settings'}</button>
+              <button type="button" class="mini" data-dup-q="${qi}" title="Duplicate">⧉</button>
+              <button type="button" class="mini mini-danger" data-del-q="${qi}" title="Delete">×</button>
+            </span>
+          </div>
+        </div>
+      </article>`;
+  }).join('');
+}
+
+/* --- question events --- */
+
+const list = $('#questionList');
+
+list.addEventListener('input', (e) => {
+  const el = e.target;
+  const step = schema.steps[activeSection];
+  const qi = Number(el.dataset.q);
+  if (Number.isNaN(qi)) return;
+  const q = step.questions[qi];
+
+  if (el.dataset.set) {
+    const key = el.dataset.set;
+    let value = el.type === 'checkbox' ? el.checked : el.value;
+    if (['minWords', 'maxMB', 'maxItems'].includes(key)) value = value === '' ? undefined : Number(value);
+    if (value === '' || value === false) delete q[key]; else q[key] = value;
+    if (key === 'title') { /* live label only */ }
+    persist();
+    return;
+  }
+
+  if (el.dataset.opt != null && el.dataset.k) {
+    const opt = q.options[Number(el.dataset.opt)];
+    const k = el.dataset.k;
+    if (k === 'label') { opt.label = el.value; opt.value = el.value; }
+    else if (el.value) opt[k] = el.value;
+    else delete opt[k];
+    persist();
+  }
+});
+
+list.addEventListener('change', (e) => {
+  const el = e.target;
+  const step = schema.steps[activeSection];
+  const qi = Number(el.dataset.q);
+  if (Number.isNaN(qi)) return;
+  const q = step.questions[qi];
+
+  if (el.hasAttribute('data-type-select')) {
+    q.type = el.value;
+    const needsOptions = (QUESTION_TYPES[q.type]?.fields || []).includes('options');
+    if (needsOptions && !q.options?.length) q.options = [{ value: 'Option 1', label: 'Option 1' }];
+    if (!needsOptions) delete q.options;
+    if (q.type === 'statement') { q.body = q.body || 'Statement text'; q.consentLabel = q.consentLabel || 'I agree'; }
+    persist(); renderQuestions();
+    return;
+  }
+
+  if (el.dataset.set === 'showIfQuestion') {
+    if (!el.value) delete q.showIf;
+    else {
+      const src = schema.steps.flatMap((s) => s.questions).find((o) => o.id === el.value);
+      q.showIf = { question: el.value, equals: src?.options?.[0]?.value || '' };
+    }
+    persist(); renderQuestions();
+    return;
+  }
+  if (el.dataset.set === 'showIfEquals') { q.showIf.equals = el.value; persist(); return; }
+  if (el.dataset.set === 'allowOther' || el.dataset.set === 'half' || el.dataset.set === 'hideTitle' || el.dataset.set === 'required') {
+    persist();
+  }
+  if (el.dataset.opt != null && el.dataset.k === 'icon') persist();
+});
+
+list.addEventListener('click', (e) => {
+  const step = schema.steps[activeSection];
+  const t = (sel) => e.target.closest(sel);
+
+  const addOpt = t('[data-add-opt]');
+  if (addOpt) {
+    const q = step.questions[Number(addOpt.dataset.addOpt)];
+    const n = (q.options?.length || 0) + 1;
+    (q.options ||= []).push({ value: `Option ${n}`, label: `Option ${n}` });
+    persist(); renderQuestions(); return;
+  }
+  const delOpt = t('[data-del-opt]');
+  if (delOpt) {
+    const q = step.questions[Number(delOpt.dataset.q)];
+    q.options.splice(Number(delOpt.dataset.delOpt), 1);
+    persist(); renderQuestions(); return;
+  }
+  const toggle = t('[data-toggle-settings]');
+  if (toggle) {
+    const q = step.questions[Number(toggle.dataset.toggleSettings)];
+    q.__open = !q.__open;
+    renderQuestions(); return;
+  }
+  const dup = t('[data-dup-q]');
+  if (dup) {
+    const i = Number(dup.dataset.dupQ);
+    const copy = deepClone(step.questions[i]);
+    copy.id = `${copy.id}_${Date.now().toString(36)}`;
+    copy.title = `${copy.title} (copy)`;
+    step.questions.splice(i + 1, 0, copy);
+    persist(); renderAll(); return;
+  }
+  const del = t('[data-del-q]');
+  if (del) {
+    const i = Number(del.dataset.delQ);
+    if (!confirm(`Delete question “${step.questions[i].title}”?`)) return;
+    step.questions.splice(i, 1);
+    persist(); renderAll();
+  }
+});
+
+$('#addQuestionBtn').addEventListener('click', () => {
+  schema.steps[activeSection].questions.push(newQuestion('short_text'));
+  persist(); renderAll();
+  list.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+
+/* Drag to reorder questions */
+let dragQ = null;
+list.addEventListener('dragstart', (e) => {
+  const card = e.target.closest('.q-card');
+  if (!card) return;
+  dragQ = Number(card.dataset.q);
+  card.classList.add('dragging');
+});
+list.addEventListener('dragend', (e) => {
+  e.target.closest('.q-card')?.classList.remove('dragging');
+  dragQ = null;
+});
+list.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  const over = e.target.closest('.q-card');
+  if (!over || dragQ == null) return;
+  const to = Number(over.dataset.q);
+  if (to === dragQ) return;
+  const qs = schema.steps[activeSection].questions;
+  const [moved] = qs.splice(dragQ, 1);
+  qs.splice(to, 0, moved);
+  dragQ = to;
+  persist(); renderQuestions();
+});
+
+/* Option reorder */
+list.addEventListener('dragstart', (e) => {
+  const row = e.target.closest('.opt-row');
+  if (row) { e.stopPropagation(); row.dataset.dragging = '1'; }
+});
+list.addEventListener('dragover', (e) => {
+  const row = e.target.closest('.opt-row');
+  const src = $('.opt-row[data-dragging]', list);
+  if (!row || !src || row === src) return;
+  e.preventDefault(); e.stopPropagation();
+  const qi = Number(src.dataset.q);
+  if (Number(row.dataset.q) !== qi) return;
+  const opts = schema.steps[activeSection].questions[qi].options;
+  const [moved] = opts.splice(Number(src.dataset.opt), 1);
+  opts.splice(Number(row.dataset.opt), 0, moved);
+  delete src.dataset.dragging;
+  persist(); renderQuestions();
+});
+
+/* ------------------------------------------------------------ preview */
+
+$('#previewBtn').addEventListener('click', () => {
+  const step = schema.steps[activeSection];
+  $('#previewStepName').textContent = step.title;
+  $('#previewHost').innerHTML = `
+    <span class="step-ico">${typeof icon === 'function' ? icon(step.icon || 'layers') : ''}</span>
+    <h2 class="step-title">${esc2(step.title)}</h2>
+    ${step.subtitle ? `<p class="step-subtitle">${esc2(step.subtitle)}</p>` : ''}
+    <div class="step-questions">${step.questions.map(renderQuestion).join('')}</div>`;
+  $('#previewModal').hidden = false;
+});
+$('#closePreview').addEventListener('click', () => { $('#previewModal').hidden = true; });
+
+/* ------------------------------------------------------------ import / export */
+
+function cleanSchema() {
+  const clean = deepClone(schema);
+  clean.steps.forEach((s) => s.questions.forEach((q) => { delete q.__open; }));
+  return clean;
+}
+
+function download(filename, text, mime) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: mime }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* Publish → a drop-in replacement for form-schema.js. It is a script rather
+   than raw JSON so the form can read it synchronously, before rendering. */
+$('#exportBtn').addEventListener('click', () => {
+  const body = `/* Published form definition — generated by admin.html.\n`
+    + `   Commit this file to make the changes live for everyone. */\n\n`
+    + `window.PUBLISHED_SCHEMA = ${JSON.stringify(cleanSchema(), null, 2)};\n`;
+  download('form-schema.js', body, 'application/javascript');
+});
+
+$('#exportJsonBtn').addEventListener('click', () => {
+  download('form-schema.json', JSON.stringify(cleanSchema(), null, 2), 'application/json');
+});
+
+$('#importBtn').addEventListener('click', () => {
+  $('#importText').value = '';
+  $('#importError').hidden = true;
+  $('#importModal').hidden = false;
+});
+$('#closeImport').addEventListener('click', () => { $('#importModal').hidden = true; });
+
+$('#doImport').addEventListener('click', () => {
+  const err = $('#importError');
+  try {
+    // Accept either raw JSON or a pasted form-schema.js
+    const text = $('#importText').value.trim()
+      .replace(/^[\s\S]*?window\.PUBLISHED_SCHEMA\s*=\s*/, '')
+      .replace(/;\s*$/, '');
+    const parsed = JSON.parse(text);
+    if (!parsed || !Array.isArray(parsed.steps) || !parsed.steps.length) {
+      throw new Error('JSON must contain a non-empty "steps" array.');
+    }
+    parsed.steps.forEach((s, i) => {
+      if (!Array.isArray(s.questions)) throw new Error(`Section ${i + 1} has no "questions" array.`);
+    });
+    schema = parsed;
+    activeSection = 0;
+    persist(); renderAll();
+    $('#importModal').hidden = true;
+  } catch (e) {
+    err.textContent = `Could not import: ${e.message}`;
+    err.hidden = false;
+  }
+});
+
+/* Drops this browser's local edits so the published schema (or the built-in
+   default) takes over again — the same state a visitor sees. */
+$('#resetBtn').addEventListener('click', () => {
+  if (!confirm('Discard the edits saved in this browser and reload the published form?')) return;
+  clearSchemaOverride();
+  schema = loadSchema();
+  activeSection = 0;
+  renderAll();
+  const badge = $('#savedState');
+  badge.textContent = 'Reset';
+  badge.classList.add('is-on');
+  setTimeout(() => badge.classList.remove('is-on'), 1600);
+});
+
+/* ------------------------------------------------------------ boot */
+
+function renderAll() {
+  const step = schema.steps[activeSection];
+  $('#formTitle').value = schema.title || '';
+  $('#formDesc').value = schema.description || '';
+  $('#sectionTitle').value = step.title || '';
+  $('#sectionSubtitle').value = step.subtitle || '';
+  $('#sectionNav').value = step.navLabel || '';
+  $('#sectionIcon').value = step.icon || 'layers';
+  renderSectionList();
+  renderQuestions();
+}
+
+renderAll();

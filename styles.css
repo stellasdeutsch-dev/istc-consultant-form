@@ -974,6 +974,20 @@ body {
 
 /* ============ Fields ============ */
 
+/* Questions flow full width unless the schema marks them `half`. */
+.step-questions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 1.25rem;
+}
+
+.step-questions > .field { grid-column: 1 / -1; }
+.step-questions > .field.q-half { grid-column: span 1; }
+
+@media (max-width: 560px) {
+  .step-questions > .field.q-half { grid-column: 1 / -1; }
+}
+
 .field { margin-bottom: 1.75rem; border: 0; }
 .field:last-child { margin-bottom: 0; }
 

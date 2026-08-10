@@ -9,7 +9,12 @@ Expressions of Interest for the ISTC Consultant Database.
 
 | File | Purpose |
 | --- | --- |
-| `index.html` | Landing page + the multi-step application form (11 steps + review + success) |
+| `admin.html` | **Form editor** — add/edit/reorder questions and sections, no code needed |
+| `admin.js` / `admin.css` | The editor's logic and chrome |
+| `schema.js` | Question types + the built-in default form definition |
+| `form-schema.js` | The **published** form. Replace it with the file from *Publish…* to change the live form |
+| `render.js` | Turns the schema into the form's DOM; owns each question type's rendering, value and validation |
+| `index.html` | Landing page + the application shell (steps are rendered from the schema) |
 | `styles.css` | Design system: two-tone display type, glossy gradient CTAs, navy accent cards, light/dark themes, reduced-motion support |
 | `app.js` | Step navigation, validation, smart inputs, file uploads, draft autosave, submission |
 | `map.js` | Interactive world map component (showcase tour + country picker) |
@@ -17,6 +22,36 @@ Expressions of Interest for the ISTC Consultant Database.
 | `landing.js` | Landing page behaviour: map tour, scroll reveals, header hairline |
 | `data.js` | Suggestion lists for autocomplete (countries, nationalities, languages) |
 | `apps-script/Code.gs` | Google Apps Script backend that stores submissions in a Google Sheet + Drive |
+
+## Editing the questions (admin panel)
+
+Open **`admin.html`** — a Google-Forms-style editor. You can:
+
+- add, rename, duplicate, delete and drag-reorder **sections** and **questions**;
+- switch a question's **type** (short answer, paragraph, multiple choice,
+  checkboxes, dropdown, linear scale, email, phone, number, month, file upload,
+  statement + consent, plus the custom widgets: country map, languages,
+  repeatable assignments, paired rates);
+- edit **options** (label, description, icon) for choice questions, and enable
+  an "Other" box;
+- toggle **Required**, add help text, set half-width layout, hide a title;
+- set per-type **validation** — minimum words, file size and accepted types,
+  autocomplete source, text rules, min/max for numbers;
+- make a question **conditional** ("show only if … equals …");
+- **Preview** a section exactly as applicants will see it.
+
+**Saving is not publishing.** Edits go to the editor's own browser storage as
+you type. Press **Publish…**, then commit the downloaded `form-schema.js` over
+the existing one — that is what changes the form for everyone. **Reset**
+discards local edits and shows the published version again.
+
+> `admin.html` is not a security boundary: a static site cannot keep anyone out
+> of a page, and no browser-side password would be real. It only changes what
+> the form *asks* — it cannot read submissions. Keep the URL internal and treat
+> repository write access as the real gate on what goes live.
+
+The Apps Script backend derives its spreadsheet columns from each submission,
+so questions added in the editor appear as new columns automatically.
 
 ## Deploying
 

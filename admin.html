@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script>try { document.documentElement.dataset.theme = localStorage.getItem('istc-theme') || 'light'; } catch (e) { document.documentElement.dataset.theme = 'light'; }</script>
+  <title>Form editor — ISTC Consultant Database</title>
+  <meta name="robots" content="noindex" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23204068'/%3E%3Ctext x='32' y='43' font-family='-apple-system,Helvetica,Arial' font-size='30' font-weight='700' fill='white' text-anchor='middle'%3E%E2%9A%99%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css?v=2026-08-10g" />
+  <link rel="stylesheet" href="admin.css?v=2026-08-10g" />
+</head>
+<body class="admin-body">
+
+  <header class="admin-header">
+    <div class="admin-header-inner">
+      <div class="brand">
+        <span class="brand-mark">ISTC</span>
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span class="brand-name">Form editor</span>
+      </div>
+      <div class="admin-actions">
+        <span class="admin-saved" id="savedState" aria-live="polite"></span>
+        <button type="button" class="admin-btn" id="previewBtn">Preview</button>
+        <button type="button" class="admin-btn" id="importBtn">Import</button>
+        <button type="button" class="admin-btn" id="exportJsonBtn">Export JSON</button>
+        <button type="button" class="admin-btn admin-btn-primary" id="exportBtn">Publish…</button>
+        <button type="button" class="admin-btn admin-btn-ghost" id="resetBtn">Reset</button>
+        <a class="admin-btn" href="index.html" target="_blank" rel="noopener">Open form ↗</a>
+        <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch appearance">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4l1.4-1.4"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="admin-main">
+    <aside class="admin-sidebar">
+      <h2 class="admin-side-title">Sections</h2>
+      <ol class="section-list" id="sectionList"></ol>
+      <button type="button" class="admin-add" id="addSectionBtn">
+        <span aria-hidden="true">+</span> Add section
+      </button>
+
+      <div class="admin-note">
+        <strong>Saving vs publishing</strong>
+        <p>
+          Edits save to <em>this browser</em> as you type — nobody else sees them yet.
+          To make them live, press <em>Publish…</em>, then commit the downloaded
+          <code>form-schema.js</code> to the repository (replacing the existing file).
+          <em>Reset</em> discards local edits and shows the published form again.
+        </p>
+      </div>
+
+      <div class="admin-note admin-note-warn">
+        <strong>This page is not a security boundary</strong>
+        <p>
+          The site is static, so <code>admin.html</code> is reachable by anyone who
+          knows the URL, and nothing here can be locked behind a password in the
+          browser alone. It changes only what the form <em>asks</em>; it cannot read
+          submissions. Keep the URL internal, and rely on the repository's write
+          access as the real control over what goes live.
+        </p>
+      </div>
+    </aside>
+
+    <div class="admin-canvas">
+      <div class="admin-form-head">
+        <label class="admin-label" for="formTitle">Form title</label>
+        <input class="admin-input admin-input-title" id="formTitle" type="text" />
+        <label class="admin-label" for="formDesc">Description</label>
+        <textarea class="admin-input" id="formDesc" rows="2"></textarea>
+      </div>
+
+      <div class="admin-section-head">
+        <div>
+          <label class="admin-label" for="sectionTitle">Section title</label>
+          <input class="admin-input admin-input-title" id="sectionTitle" type="text" />
+        </div>
+        <div>
+          <label class="admin-label" for="sectionSubtitle">Section subtitle</label>
+          <input class="admin-input" id="sectionSubtitle" type="text" />
+        </div>
+        <div class="admin-two">
+          <div>
+            <label class="admin-label" for="sectionNav">Step label (navigator)</label>
+            <input class="admin-input" id="sectionNav" type="text" />
+          </div>
+          <div>
+            <label class="admin-label" for="sectionIcon">Icon</label>
+            <select class="admin-input" id="sectionIcon"></select>
+          </div>
+        </div>
+      </div>
+
+      <div id="questionList"></div>
+
+      <div class="admin-add-row">
+        <button type="button" class="admin-add" id="addQuestionBtn">
+          <span aria-hidden="true">+</span> Add question
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Preview -->
+  <div class="admin-modal" id="previewModal" hidden>
+    <div class="admin-modal-card admin-modal-wide">
+      <div class="admin-modal-head">
+        <h2>Preview — <span id="previewStepName"></span></h2>
+        <button type="button" class="admin-btn admin-btn-ghost" id="closePreview">Close</button>
+      </div>
+      <div class="admin-preview-body">
+        <div class="step-card" id="previewHost"></div>
+      </div>
+      <p class="admin-modal-note">
+        A visual preview of this section. Buttons and the map are not interactive here —
+        open the real form to test behaviour.
+      </p>
+    </div>
+  </div>
+
+  <!-- Import -->
+  <div class="admin-modal" id="importModal" hidden>
+    <div class="admin-modal-card">
+      <div class="admin-modal-head">
+        <h2>Import schema JSON</h2>
+        <button type="button" class="admin-btn admin-btn-ghost" id="closeImport">Close</button>
+      </div>
+      <textarea class="admin-input admin-json" id="importText" rows="14" placeholder="Paste the contents of form-schema.json here…"></textarea>
+      <p class="admin-modal-error" id="importError" hidden></p>
+      <div class="admin-modal-foot">
+        <button type="button" class="admin-btn admin-btn-primary" id="doImport">Replace form with this JSON</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="schema.js?v=2026-08-10g"></script>
+  <script src="data.js?v=2026-08-10g"></script>
+  <script src="icons.js?v=2026-08-10g"></script>
+  <script src="render.js?v=2026-08-10g"></script>
+  <script src="admin.js?v=2026-08-10g"></script>
+</body>
+</html>
