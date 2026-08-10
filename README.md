@@ -18,6 +18,16 @@ Expressions of Interest for the ISTC Consultant Database.
 | `data.js` | Suggestion lists for autocomplete (countries, nationalities, languages) |
 | `apps-script/Code.gs` | Google Apps Script backend that stores submissions in a Google Sheet + Drive |
 
+## Deploying
+
+Push to `main` and GitHub Pages rebuilds within a minute or two.
+
+**Bump the cache token when you change any CSS or JS.** Asset URLs in
+`index.html` carry a `?v=` query string (e.g. `styles.css?v=2026-08-10a`).
+GitHub Pages caches assets for ~10 minutes, so without a new token some
+visitors would run new HTML against stale CSS/JS. Change every `?v=` to the
+same new value in one edit.
+
 ## The country map
 
 Geographic experience is captured with an interactive world map instead of a
