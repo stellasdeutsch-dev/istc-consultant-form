@@ -36,17 +36,48 @@
     <!-- ============ INTRO ============ -->
     <section class="step step-intro" data-step="intro">
       <div class="hero">
-        <p class="hero-eyebrow">Expression of Interest</p>
-        <h1 class="hero-title">ISTC Consultant<br />Database</h1>
+        <div class="hero-glow" aria-hidden="true"></div>
+        <p class="hero-eyebrow">ISTC Consultant Database</p>
+        <h1 class="hero-title">
+          <span class="line"><span>Science for</span></span>
+          <span class="line"><span class="grad">global security.</span></span>
+        </h1>
         <p class="hero-lead">
           The International Science and Technology Center invites qualified individual
           experts, researchers, and consulting firms to submit an Expression of Interest
           for inclusion in its Consultant Database.
         </p>
-        <button class="btn btn-primary btn-large" id="startBtn" type="button">
-          Start application
-        </button>
-        <p class="hero-time">Takes about 10–15 minutes</p>
+        <div class="hero-cta">
+          <button class="btn btn-primary btn-large" id="startBtn" type="button">
+            Start application
+          </button>
+          <p class="hero-time">Takes about 10–15 minutes</p>
+        </div>
+      </div>
+
+      <div class="globe-wrap" id="globeWrap" aria-hidden="true">
+        <canvas id="globeCanvas"></canvas>
+        <div class="chip-float" style="left: 2%; top: 18%; --d: 0s">Biological Security</div>
+        <div class="chip-float" style="left: -1%; top: 50%; --d: 1.4s">Export Control</div>
+        <div class="chip-float" style="left: 7%; top: 78%; --d: 2.2s">Disease Surveillance</div>
+        <div class="chip-float" style="right: 2%; top: 15%; --d: 0.7s">Cybersecurity</div>
+        <div class="chip-float" style="right: -1%; top: 46%; --d: 1.9s">Chemical Safety</div>
+        <div class="chip-float" style="right: 5%; top: 75%; --d: 2.7s">Nuclear &amp; Radiological</div>
+      </div>
+
+      <div class="hero-stats" id="heroStats">
+        <div class="stat">
+          <span class="stat-num" data-count="30" data-suffix="+">0</span>
+          <span class="stat-label">years of international scientific cooperation</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num" data-count="14">0</span>
+          <span class="stat-label">domains of expertise</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num" data-count="9">0</span>
+          <span class="stat-label">regions covered worldwide</span>
+        </div>
       </div>
 
       <div class="intro-cards">
@@ -72,6 +103,40 @@
           <p>Submission constitutes an Expression of Interest for potential consideration in future consultancy assignments. Inclusion does not create any entitlement to, or guarantee of, a contract award.</p>
         </div>
       </div>
+
+      <section class="how" aria-labelledby="howTitle">
+        <h2 class="section-title" id="howTitle">Four steps to join the roster</h2>
+        <ol class="how-steps">
+          <li class="how-step">
+            <span class="how-num">1</span>
+            <h3>Tell us your role</h3>
+            <p>Apply as a consultant, peer reviewer, or researcher — as an individual or a firm.</p>
+          </li>
+          <li class="how-step">
+            <span class="how-num">2</span>
+            <h3>Share your expertise</h3>
+            <p>Select your domains and regions, and describe the assignments that best demonstrate them.</p>
+          </li>
+          <li class="how-step">
+            <span class="how-num">3</span>
+            <h3>Attach your CV</h3>
+            <p>Upload your CV, plus certifications and publications if you have them.</p>
+          </li>
+          <li class="how-step">
+            <span class="how-num">4</span>
+            <h3>Review and submit</h3>
+            <p>Check every answer on one page, then submit. Your progress saves as you go.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="closer">
+        <h2 class="closer-title">Ready when you are.</h2>
+        <p class="closer-text">
+          Your answers are saved in this browser as you go, so you can step away and come back.
+        </p>
+        <button class="btn btn-primary btn-large" id="startBtn2" type="button">Start application</button>
+      </section>
 
       <p class="intro-privacy">
         You may request the removal of your profile and associated data at any time by writing to
@@ -549,5 +614,6 @@
 
   <script src="data.js"></script>
   <script src="app.js"></script>
+  <script src="globe.js"></script>
 </body>
 </html>

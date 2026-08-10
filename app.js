@@ -594,7 +594,9 @@ function goToStep(next, { animate = true } = {}) {
   if (next === TOTAL_STEPS) renderReview();
 }
 
-startBtn.addEventListener('click', () => goToStep(1));
+[startBtn, $('#startBtn2')].filter(Boolean).forEach((btn) =>
+  btn.addEventListener('click', () => goToStep(1))
+);
 
 backBtn.addEventListener('click', () => {
   if (state.step > 1) goToStep(state.step - 1);

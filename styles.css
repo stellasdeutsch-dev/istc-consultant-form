@@ -55,6 +55,10 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Author `display` rules outrank the UA sheet's [hidden], so state it here:
+   anything with the hidden attribute stays hidden (nav, dropzone states, chips). */
+[hidden] { display: none !important; }
+
 html { scroll-behavior: smooth; }
 
 body {
@@ -169,43 +173,233 @@ body {
   padding: 0 1.375rem 4rem;
 }
 
-/* ============ Intro / hero ============ */
+/* ============ Landing: hero ============ */
+
+.step-intro { padding-top: 0; }
 
 .hero {
+  position: relative;
   text-align: center;
-  padding: clamp(3.5rem, 9vh, 6.5rem) 0 clamp(2.5rem, 6vh, 4rem);
-  max-width: 640px;
+  padding: clamp(3.5rem, 11vh, 7rem) 0 clamp(1.5rem, 4vh, 2.5rem);
+  max-width: 720px;
   margin: 0 auto;
+  z-index: 2;
+}
+
+/* Soft aurora behind the headline — depth without stealing focus */
+.hero-glow {
+  position: absolute;
+  left: 50%;
+  top: 8%;
+  width: min(46rem, 120%);
+  aspect-ratio: 1.6;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(40% 45% at 32% 40%, rgba(0, 113, 227, 0.22), transparent 70%),
+    radial-gradient(38% 42% at 68% 55%, rgba(90, 60, 230, 0.16), transparent 70%);
+  filter: blur(28px);
+  pointer-events: none;
+  z-index: -1;
+  animation: aurora 14s var(--ease-out) infinite alternate;
+}
+
+@keyframes aurora {
+  from { transform: translateX(-50%) scale(1) rotate(0deg); opacity: 0.9; }
+  to { transform: translateX(-52%) scale(1.12) rotate(6deg); opacity: 1; }
+}
+
+:root[data-theme="dark"] .hero-glow {
+  background:
+    radial-gradient(40% 45% at 32% 40%, rgba(10, 132, 255, 0.3), transparent 70%),
+    radial-gradient(38% 42% at 68% 55%, rgba(120, 90, 255, 0.22), transparent 70%);
 }
 
 .hero-eyebrow {
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--accent);
-  letter-spacing: 0.01em;
-  margin-bottom: 0.75rem;
+  letter-spacing: 0.02em;
+  margin-bottom: 1rem;
+  animation: rise 700ms var(--ease-spring) both;
 }
 
 .hero-title {
-  font-size: clamp(2.375rem, 6.5vw, 3.75rem);
-  line-height: 1.05;
-  letter-spacing: -0.02em;
+  font-size: clamp(2.5rem, 7.5vw, 4.5rem);
+  line-height: 1.03;
+  letter-spacing: -0.03em;
   font-weight: 700;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.5rem;
+  font-optical-sizing: auto;
+}
+
+/* Masked line-by-line reveal — text rises out of its own clip box */
+.hero-title .line {
+  display: block;
+  overflow: hidden;
+  padding-bottom: 0.06em;
+}
+
+.hero-title .line > span {
+  display: block;
+  animation: line-up 1s var(--ease-spring) both;
+}
+
+.hero-title .line:nth-child(1) > span { animation-delay: 80ms; }
+.hero-title .line:nth-child(2) > span { animation-delay: 200ms; }
+
+@keyframes line-up {
+  from { transform: translateY(105%); }
+  to { transform: translateY(0); }
+}
+
+.grad {
+  background: linear-gradient(100deg, var(--accent) 8%, #7b5cff 52%, #00c2c7 96%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  background-size: 220% 100%;
+  animation: line-up 1s var(--ease-spring) 200ms both, grad-pan 9s ease-in-out 1.2s infinite alternate;
+}
+
+@keyframes grad-pan {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
 }
 
 .hero-lead {
-  font-size: clamp(1.0625rem, 2vw, 1.1875rem);
+  font-size: clamp(1.0625rem, 2vw, 1.25rem);
   line-height: 1.55;
   letter-spacing: 0.001em;
   color: var(--text-secondary);
   margin-bottom: 2rem;
+  animation: rise 800ms var(--ease-spring) 360ms both;
 }
+
+.hero-cta { animation: rise 800ms var(--ease-spring) 480ms both; }
 
 .hero-time {
   margin-top: 0.875rem;
   font-size: 0.8125rem;
   color: var(--text-tertiary);
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Primary button gets a soft accent halo on the landing page */
+.step-intro .btn-primary {
+  box-shadow: 0 6px 24px rgba(0, 113, 227, 0.32);
+}
+
+.step-intro .btn-primary:hover {
+  box-shadow: 0 10px 32px rgba(0, 113, 227, 0.42);
+  transform: translateY(-1px);
+}
+
+/* ============ Landing: interactive globe ============ */
+
+.globe-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 44rem;
+  margin: 0 auto;
+  aspect-ratio: 1.35;
+  animation: rise 900ms var(--ease-spring) 560ms both;
+}
+
+#globeCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+#globeCanvas:active { cursor: grabbing; }
+
+.chip-float {
+  position: absolute;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: -0.002em;
+  white-space: nowrap;
+  padding: 0.4375rem 0.8125rem;
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--menu-bg);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  backdrop-filter: blur(14px) saturate(180%);
+  border: 1px solid var(--separator);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.09);
+  animation: chip-appear 700ms var(--ease-spring) both, bob 7s ease-in-out infinite;
+  animation-delay: calc(700ms + var(--d)), calc(1.4s + var(--d));
+  pointer-events: none;
+}
+
+@keyframes chip-appear {
+  from { opacity: 0; transform: scale(0.82); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-9px); }
+}
+
+@media (max-width: 700px) {
+  .chip-float { display: none; }
+  .globe-wrap { aspect-ratio: 1.1; }
+}
+
+/* ============ Landing: stats ============ */
+
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  max-width: 760px;
+  margin: clamp(1rem, 4vh, 2.5rem) auto clamp(3rem, 8vh, 5rem);
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .hero-stats { grid-template-columns: 1fr; gap: 1.75rem; }
+}
+
+.stat-num {
+  display: block;
+  font-size: clamp(2rem, 4.5vw, 2.875rem);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(140deg, var(--accent), #7b5cff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.stat-label {
+  display: block;
+  margin-top: 0.375rem;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  max-width: 15rem;
+  margin-inline: auto;
+}
+
+/* ============ Landing: sections ============ */
+
+.section-title {
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.022em;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: clamp(1.75rem, 4vw, 2.75rem);
 }
 
 .intro-cards {
@@ -217,12 +411,101 @@ body {
 }
 
 .intro-card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--separator);
   border-radius: var(--radius-lg);
   padding: 1.625rem 1.5rem;
   box-shadow: var(--card-shadow);
+  transition: transform 400ms var(--ease-spring), box-shadow 400ms var(--ease-out), border-color 300ms var(--ease-out);
 }
+
+.intro-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(0, 113, 227, 0.35);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 20px 44px rgba(0, 0, 0, 0.10);
+}
+
+/* How it works */
+
+.how { max-width: 900px; margin: clamp(3.5rem, 10vh, 6rem) auto 0; }
+
+.how-steps {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 1.25rem 1rem;
+  counter-reset: how;
+}
+
+.how-step { position: relative; padding-top: 0.5rem; }
+
+.how-num {
+  display: grid;
+  place-items: center;
+  width: 2.125rem;
+  height: 2.125rem;
+  border-radius: 50%;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(140deg, var(--accent), #7b5cff);
+  box-shadow: 0 6px 16px rgba(0, 113, 227, 0.3);
+  margin-bottom: 0.875rem;
+}
+
+.how-step h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+  margin-bottom: 0.3125rem;
+}
+
+.how-step p {
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* Closing CTA */
+
+.closer {
+  text-align: center;
+  max-width: 620px;
+  margin: clamp(3.5rem, 10vh, 6rem) auto clamp(2rem, 5vh, 3rem);
+  padding: clamp(2.5rem, 6vw, 3.5rem) 1.5rem;
+  border-radius: 26px;
+  border: 1px solid var(--separator);
+  background:
+    radial-gradient(120% 140% at 50% 0%, var(--accent-tint), transparent 62%),
+    var(--surface);
+  box-shadow: var(--card-shadow);
+}
+
+.closer-title {
+  font-size: clamp(1.625rem, 3.6vw, 2.25rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  margin-bottom: 0.625rem;
+}
+
+.closer-text {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  margin-bottom: 1.75rem;
+  line-height: 1.55;
+}
+
+/* Scroll reveal (JS adds .in when the element enters the viewport) */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(26px);
+  transition: opacity 800ms var(--ease-out), transform 800ms var(--ease-spring);
+}
+
+.reveal.in { opacity: 1; transform: none; }
 
 .intro-card-icon {
   width: 2.25rem;
@@ -1111,7 +1394,6 @@ legend.field-label { margin-bottom: 0.75rem; }
 .btn-add:hover { border-color: var(--accent); background: var(--accent-tint); }
 .btn-add:active { transform: scale(0.99); }
 .btn-add:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.btn-add[hidden] { display: none; }
 
 /* ============ Step transitions (JS adds classes) ============ */
 
@@ -1153,6 +1435,15 @@ legend.field-label { margin-bottom: 0.75rem; }
   }
   .option-check::after { transition: none; }
   .chip, .assignment-card { animation: none; }
+  /* Landing: keep the content, drop the movement */
+  .hero-eyebrow, .hero-lead, .hero-cta, .globe-wrap,
+  .hero-title .line > span, .grad, .chip-float, .hero-glow {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .intro-card:hover, .step-intro .btn-primary:hover { transform: none; }
   .progress-fill { transition: width 150ms ease; }
   .btn:active, .option:active, .segment:active span, .dropzone:active { transform: none; }
 }
