@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ISTC Consultant Database — Expression of Interest</title>
+  <meta name="description" content="Submit an Expression of Interest for inclusion in the ISTC Consultant Database." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230071e3'/%3E%3Ctext x='32' y='42' font-family='-apple-system,Helvetica,Arial' font-size='26' font-weight='700' fill='white' text-anchor='middle'%3EI%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header class="site-header" id="siteHeader">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-mark">ISTC</span>
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span class="brand-name">Consultant Database</span>
+      </div>
+      <div class="step-indicator" id="stepIndicator" aria-live="polite"></div>
+    </div>
+    <div class="progress-track" aria-hidden="true">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- ============ INTRO ============ -->
+    <section class="step step-intro" data-step="intro">
+      <div class="hero">
+        <p class="hero-eyebrow">Expression of Interest</p>
+        <h1 class="hero-title">ISTC Consultant<br />Database</h1>
+        <p class="hero-lead">
+          The International Science and Technology Center invites qualified individual
+          experts, researchers, and consulting firms to submit an Expression of Interest
+          for inclusion in its Consultant Database.
+        </p>
+        <button class="btn btn-primary btn-large" id="startBtn" type="button">
+          Start application
+        </button>
+        <p class="hero-time">Takes about 10–15 minutes</p>
+      </div>
+
+      <div class="intro-cards">
+        <div class="intro-card">
+          <div class="intro-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+          </div>
+          <h3>What this is</h3>
+          <p>ISTC engages specialized expertise in support of its mandate to promote international cooperation in science and technology, strengthen global security, and advance responsible scientific engagement.</p>
+        </div>
+        <div class="intro-card">
+          <div class="intro-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-5"/><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>
+          </div>
+          <h3>Areas of interest</h3>
+          <p>The database is a roster of experts with demonstrated experience in CBRN risk mitigation, security research, disaster risk management, medical preparedness, export control, and related domains.</p>
+        </div>
+        <div class="intro-card">
+          <div class="intro-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>
+          </div>
+          <h3>What happens next</h3>
+          <p>Submission constitutes an Expression of Interest for potential consideration in future consultancy assignments. Inclusion does not create any entitlement to, or guarantee of, a contract award.</p>
+        </div>
+      </div>
+
+      <p class="intro-privacy">
+        You may request the removal of your profile and associated data at any time by writing to
+        <a href="mailto:consulting.tenders@istc.int">consulting.tenders@istc.int</a>.
+      </p>
+    </section>
+
+    <form id="eoiForm" novalidate>
+
+      <!-- ============ STEP 1 · APPLICATION TYPE ============ -->
+      <section class="step" data-step="1" hidden>
+        <div class="step-card">
+          <h2 class="step-title" tabindex="-1">Application Type</h2>
+          <p class="step-subtitle">Tell us how you would like to work with ISTC.</p>
+
+          <fieldset class="field">
+            <legend class="field-label">Role <span class="req" aria-hidden="true">*</span></legend>
+            <div class="option-group" data-error-anchor="role">
+              <label class="option">
+                <input type="radio" name="role" value="Consultant (Technical / Advisory Assignments)" />
+                <span class="option-check" aria-hidden="true"></span>
+                <span class="option-body">
+                  <span class="option-title">Consultant</span>
+                  <span class="option-desc">Technical / advisory assignments</span>
+                </span>
+              </label>
+              <label class="option">
+                <input type="radio" name="role" value="Peer reviewer (Proposal / Project Evaluation)" />
+                <span class="option-check" aria-hidden="true"></span>
+                <span class="option-body">
+                  <span class="option-title">Peer reviewer</span>
+                  <span class="option-desc">Proposal / project evaluation</span>
+                </span>
+              </label>
+              <label class="option">
+                <input type="radio" name="role" value="Researcher (research, implementation, training, and evaluation)" />
+                <span class="option-check" aria-hidden="true"></span>
+                <span class="option-body">
+                  <span class="option-title">Researcher</span>
+                  <span class="option-desc">Research, implementation, training, and evaluation</span>
+                </span>
+              </label>
+            </div>
+            <p class="field-error" data-error-for="role" role="alert" hidden></p>
+          </fieldset>
+
+          <fieldset class="field">
+            <legend class="field-label">Legal Status <span class="req" aria-hidden="true">*</span></legend>
+            <div class="option-group option-group-row" data-error-anchor="legalStatus">
+              <label class="option">
+                <input type="radio" name="legalStatus" value="Individual Consultant" />
+                <span class="option-check" aria-hidden="true"></span>
+                <span class="option-body">
+                  <span class="option-title">Individual</span>
+                  <span class="option-desc">Individual consultant</span>
+                </span>
+              </label>
+              <label class="option">
+                <input type="radio" name="legalStatus" value="Consulting Firm / Organization" />
+                <span class="option-check" aria-hidden="true"></span>
+                <span class="option-body">
+                  <span class="option-title">Firm</span>
+                  <span class="option-desc">Consulting firm / organization</span>
+                </span>
+              </label>
+            </div>
+            <p class="field-error" data-error-for="legalStatus" role="alert" hidden></p>
+          </fieldset>
+        </div>
+      </section>
+
+      <!-- ============ STEP 2 · GENERAL INFORMATION ============ -->
+      <section class="step" data-step="2" hidden>
+        <div class="step-card">
+          <h2 class="step-title" tabindex="-1">General Information</h2>
+          <p class="step-subtitle">How can we reach you?</p>
+
+          <div class="field" id="orgNameField" hidden>
+            <label class="field-label" for="orgName">Organization Name <span class="req" aria-hidden="true">*</span></label>
+            <input class="text-input" type="text" id="orgName" name="orgName" autocomplete="organization" />
+            <p class="field-error" data-error-for="orgName" role="alert" hidden></p>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="fullName" id="fullNameLabel">Full Name <span class="req" aria-hidden="true">*</span></label>
+            <input class="text-input" type="text" id="fullName" name="fullName" autocomplete="name" />
+            <p class="field-error" data-error-for="fullName" role="alert" hidden></p>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="nationality">Nationality <span class="req" aria-hidden="true">*</span></label>
+              <input class="text-input" type="text" id="nationality" name="nationality" autocomplete="country-name" />
+              <p class="field-error" data-error-for="nationality" role="alert" hidden></p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="countryResidence">Country of Residence <span class="req" aria-hidden="true">*</span></label>
+              <input class="text-input" type="text" id="countryResidence" name="countryResidence" autocomplete="country-name" />
+              <p class="field-error" data-error-for="countryResidence" role="alert" hidden></p>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="email">Email Address <span class="req" aria-hidden="true">*</span></label>
+              <input class="text-input" type="email" id="email" name="email" autocomplete="email" inputmode="email" />
+              <p class="field-error" data-error-for="email" role="alert" hidden></p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="phone">Phone Number <span class="req" aria-hidden="true">*</span></label>
+              <input class="text-input" type="tel" id="phone" name="phone" autocomplete="tel" inputmode="tel" placeholder="+1 234 567 8900" />
+              <p class="field-error" data-error-for="phone" role="alert" hidden></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ STEP 3 · SUPPORTING DOCUMENTS ============ -->
+      <section class="step" data-step="3" hidden>
+        <div class="step-card">
+          <h2 class="step-title" tabindex="-1">Supporting Documents</h2>
+          <p class="step-subtitle">PDF or Word documents, one file each, up to 10 MB.</p>
+
+          <div class="field">
+            <span class="field-label" id="cvLabel">Curriculum Vitae <span class="req" aria-hidden="true">*</span></span>
+            <div class="dropzone" data-file-key="cv" tabindex="0" role="button" aria-labelledby="cvLabel" aria-describedby="cvHint">
+              <input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt" hidden />
+              <div class="dropzone-empty">
+                <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/></svg>
+                <span class="dropzone-text"><strong>Choose a file</strong> or drag it here</span>
+                <span class="dropzone-hint" id="cvHint">Max 10 MB</span>
+              </div>
+              <div class="file-chip" hidden>
+                <svg class="file-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+                <span class="file-chip-info">
+                  <span class="file-chip-name"></span>
+                  <span class="file-chip-size"></span>
+                </span>
+                <button type="button" class="file-chip-remove" aria-label="Remove file">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                </button>
+              </div>
+            </div>
+            <p class="field-error" data-error-for="cv" role="alert" hidden></p>
+          </div>
+
+          <div class="field">
+            <span class="field-label" id="certLabel">Relevant Certifications <span class="optional">Optional</span></span>
+            <div class="dropzone" data-file-key="certifications" tabindex="0" role="button" aria-labelledby="certLabel">
+              <input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt" hidden />
+              <div class="dropzone-empty">
+                <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/></svg>
+                <span class="dropzone-text"><strong>Choose a file</strong> or drag it here</span>
+                <span class="dropzone-hint">Max 10 MB</span>
+              </div>
+              <div class="file-chip" hidden>
+                <svg class="file-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+                <span class="file-chip-info">
+                  <span class="file-chip-name"></span>
+                  <span class="file-chip-size"></span>
+                </span>
+                <button type="button" class="file-chip-remove" aria-label="Remove file">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                </button>
+              </div>
+            </div>
+            <p class="field-error" data-error-for="certifications" role="alert" hidden></p>
+          </div>
+
+          <div class="field">
+            <span class="field-label" id="pubLabel">Publications <span class="optional">Optional</span></span>
+            <div class="dropzone" data-file-key="publications" tabindex="0" role="button" aria-labelledby="pubLabel">
+              <input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt" hidden />
+              <div class="dropzone-empty">
+                <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/></svg>
+                <span class="dropzone-text"><strong>Choose a file</strong> or drag it here</span>
+                <span class="dropzone-hint">Max 10 MB</span>
+              </div>
+              <div class="file-chip" hidden>
+                <svg class="file-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+                <span class="file-chip-info">
+                  <span class="file-chip-name"></span>
+                  <span class="file-chip-size"></span>
+                </span>
+                <button type="button" class="file-chip-remove" aria-label="Remove file">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                </button>
+              </div>
+            </div>
+            <p class="field-error" data-error-for="publications" role="alert" hidden></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ STEP 4 · AREA OF EXPERTISE ============ -->
+      <section class="step" data-step="4" hidden>
+        <div class="step-card">
+          <h2 class="step-title" tabindex="-1">Area of Expertise</h2>
+          <p class="step-subtitle">Select all areas that apply to your experience.</p>
+
+          <fieldset class="field">
+            <legend class="visually-hidden">Area of expertise</legend>
+            <div class="option-group option-grid" data-error-anchor="expertise">
+              <!-- options injected by app.js -->
+            </div>
+            <div class="field other-field" id="expertiseOtherField" hidden>
+              <label class="field-label" for="expertiseOther">Please specify</label>
+              <input class="text-input" type="text" id="expertiseOther" name="expertiseOther" />
+              <p class="field-error" data-error-for="expertiseOther" role="alert" hidden></p>
+            </div>
+            <p class="field-error" data-error-for="expertise" role="alert" hidden></p>
+          </fieldset>
+        </div>
+      </section>
+
+      <!-- ============ STEP 5 · TECHNICAL PROFILE ============ -->
+      <section class="step" data-step="5" hidden>
+        <div class="step-card">
+          <h2 class="step-title" tabindex="-1">Technical Profile</h2>
+          <p class="step-subtitle">Your experience at a glance.</p>
+
+          <fieldset class="field">
+            <legend class="field-label">Years of Relevant Experience <span class="req" aria-hidden="true">*</span></legend>
+            <div class="segmented" data-error-anchor="experience" role="radiogroup" aria-label="Years of relevant experience">
+              <label class="segment"><input type="radio" name="experience" value="3-5 years" /><span>3–5</span></label>
+              <label class="segment"><input type="radio" name="experience" value="5-10 years" /><span>5–10</span></label>
+              <label class="segment"><input type="radio" name="experience" value="10-15 years" /><span>10–15</span></label>
+              <label class="segment"><input type="radio" name="experience" value="15+ years" /><span>15+</span></label>
+            </div>
+            <p class="segmented-caption">years</p>
+            <p class="field-error" data-error-for="experience" role="alert" hidden></p>
+          </fieldset>
+
+          <fieldset class="field">
+            <legend class="field-label">Geographic Experience <span class="req" aria-hidden="true">*</span> <span class="optional">Check all that apply</span></legend>
+            <div class="option-group option-grid" data-error-anchor="geography">
+              <!-- options injected by app.js -->
+            </div>
+            <div class="field other-field" id="geographyOtherField" hidden>
+              <label class="field-label" for="geographyOther">Please specify</label>
+              <input class="text-input" type="text" id="geographyOther" name="geographyOther" />
+              <p class="field-error" data-error-for="geographyOther" role="alert" hidden></p>
+            </div>
+            <p class="field-error" data-error-for="geography" role="alert" hidden></p>
+          </fieldset>
+        </div>
+      </section>
+
+      <!-- ============ STEP 6 · PROFESSIONAL BACKGROUND ============ -->
+      <section class="step" data-step="6" hidden>
+        <div class="step-card">
+          <h2 class="step-title" tabindex="-1">Professional Background</h2>
+          <p class="step-subtitle">Tell us about your expertise in your own words.</p>
+
+          <div class="field">
+            <label class="field-label" for="languages">Languages <span class="req" aria-hidden="true">*</span></label>
+            <p class="field-hint">Working proficiency — e.g. English (fluent), Russian (native)</p>
+            <input class="text-input" type="text" id="languages" name="languages" />
+            <p class="field-error" data-error-for="languages" role="alert" hidden></p>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="summary">Summary of Expertise and/or Research Experience <span class="req" aria-hidden="true">*</span></label>
+            <p class="field-hint">Minimum 500 words</p>
+            <textarea class="text-input textarea" id="summary" name="summary" rows="10"></textarea>
+            <div class="word-counter" id="summaryCounter" aria-live="polite">0 / 500 words</div>
+            <p class="field-error" data-error-for="summary" role="alert" hidden></p>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="assignments">Key Assignments / Achievements <span class="req" aria-hidden="true">*</span></label>
+            <p class="field-hint">
+              Select and describe up to three (3) of your most relevant assignments or achievements from
+              the last 5–7 years. For each, please provide: title of project, client / organization,
+              country, duration, role, and a short description.
+            </p>
+            <textarea class="text-input textarea" id="assignments" name="assignments" rows="10"></textarea>
+            <p class="field-error" data-error-for="assignments" role="alert" hidden></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ STEP 7 · AVAILABILITY ============ -->
+      <section class="step" data-step="7" hidden>
+        <div class="step-card">
+          <h2 class="step-title" tabindex="-1">Availability</h2>
+          <p class="step-subtitle">What kinds of assignments can you take on? Select all that apply.</p>
+
+          <fieldset class="field">
+            <legend class="visually-hidden">Availability</legend>
+            <div class="option-group" data-error-anchor="availability">
+              <label class="option">
+                <input type="checkbox" name="availability" value="Short-term assignments (<3 months)" />
+                <span class="option-check option-check-square" aria-hidden="true"></span>
+                <span class="option-body"><span class="option-title">Short-term assignments</span><span class="option-desc">Under 3 months</span></span>
+              </label>
+              <label class="option">
+                <input type="checkbox" name="availability" value="Medium-term (3-12 months)" />
+                <span class="option-check option-check-square" aria-hidden="true"></span>
+                <span class="option-body"><span class="option-title">Medium-term</span><span class="option-desc">3–12 months</span></span>
+              </label>
+              <label class="option">
+                <input type="checkbox" name="availability" value="Long-term (>12 months)" />
+                <span class="option-check option-check-square" aria-hidden="true"></span>
+                <span class="option-body"><span class="option-title">Long-term</span><span class="option-desc">Over 12 months</span></span>
+              </label>
+              <label class="option">
+                <input type="checkbox" name="availability" value="Remote only" />
+                <span class="option-check option-check-square" aria-hidden="true"></span>
+                <span class="option-body"><span class="option-title">Remote only</span></span>
+              </label>
+              <label class="option">
+                <input type="checkbox" name="availability" value="Field-based assignments possible" />
+                <span class="option-check option-check-square" aria-hidden="true"></span>
+                <span class="option-body"><span class="option-title">Field-based assignments possible</span></span>
+              </label>
+            </div>
+            <p class="field-error" data-error-for="availability" role="alert" hidden></p>
+          </fieldset>
+        </div>
+      </section>
+
+      <!-- ============ STEP 8 · RATES ============ -->
+      <section class="step" data-step="8" hidden>
+        <div class="step-card">
+          <h2 class="step-title" tabindex="-1">Proposed Rate</h2>
+          <p class="step-subtitle">Please indicate your proposed all-inclusive rates in EUR.</p>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="dailyRate">Daily rate <span class="req" aria-hidden="true">*</span></label>
+              <div class="rate-input">
+                <span class="rate-prefix" aria-hidden="true">€</span>
+                <input class="text-input" type="number" id="dailyRate" name="dailyRate" min="0" step="10" inputmode="numeric" placeholder="0" />
+                <span class="rate-suffix" aria-hidden="true">/ day</span>
+              </div>
+              <p class="field-error" data-error-for="dailyRate" role="alert" hidden></p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="hourlyRate">Hourly rate <span class="req" aria-hidden="true">*</span></label>
+              <div class="rate-input">
+                <span class="rate-prefix" aria-hidden="true">€</span>
+                <input class="text-input" type="number" id="hourlyRate" name="hourlyRate" min="0" step="5" inputmode="numeric" placeholder="0" />
+                <span class="rate-suffix" aria-hidden="true">/ hour</span>
+              </div>
+              <p class="field-error" data-error-for="hourlyRate" role="alert" hidden></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ STEP 9 · PREVIOUS COLLABORATION ============ -->
+      <section class="step" data-step="9" hidden>
+        <div class="step-card">
+          <h2 class="step-title" tabindex="-1">Previous Collaboration</h2>
+          <p class="step-subtitle">Have you worked with ISTC before?</p>
+
+          <fieldset class="field">
+            <legend class="visually-hidden">Previous work with ISTC</legend>
+            <div class="option-group option-group-row" data-error-anchor="previousWork">
+              <label class="option">
+                <input type="radio" name="previousWork" value="No" />
+                <span class="option-check" aria-hidden="true"></span>
+                <span class="option-body"><span class="option-title">No</span></span>
+              </label>
+              <label class="option">
+                <input type="radio" name="previousWork" value="Yes" />
+                <span class="option-check" aria-hidden="true"></span>
+                <span class="option-body"><span class="option-title">Yes</span></span>
+              </label>
+            </div>
+            <div class="field other-field" id="referenceField" hidden>
+              <label class="field-label" for="referenceNumber">Assignment reference number <span class="req" aria-hidden="true">*</span></label>
+              <input class="text-input" type="text" id="referenceNumber" name="referenceNumber" />
+              <p class="field-error" data-error-for="referenceNumber" role="alert" hidden></p>
+            </div>
+            <p class="field-error" data-error-for="previousWork" role="alert" hidden></p>
+          </fieldset>
+        </div>
+      </section>
+
+      <!-- ============ STEP 10 · DECLARATIONS ============ -->
+      <section class="step" data-step="10" hidden>
+        <div class="step-card">
+          <h2 class="step-title" tabindex="-1">Declarations</h2>
+          <p class="step-subtitle">Please read and confirm the statements below.</p>
+
+          <div class="declaration">
+            <h3 class="declaration-title">Conflict of Interest</h3>
+            <p class="declaration-text">
+              I declare that the information provided is accurate and complete. I agree to inform ISTC
+              of any potential conflicts of interest related to future assignments.
+            </p>
+            <label class="option option-agree" data-error-anchor="conflictAgree">
+              <input type="checkbox" name="conflictAgree" value="I agree" />
+              <span class="option-check option-check-square" aria-hidden="true"></span>
+              <span class="option-body"><span class="option-title">I agree</span></span>
+            </label>
+            <p class="field-error" data-error-for="conflictAgree" role="alert" hidden></p>
+          </div>
+
+          <div class="declaration">
+            <h3 class="declaration-title">Data Protection &amp; Disclaimer</h3>
+            <p class="declaration-text">
+              Submission of this form constitutes an Expression of Interest for inclusion in the ISTC
+              Consultant Database. Inclusion in the database does not create any entitlement to, or
+              guarantee of, a consultancy contract. Consultant selection shall be conducted in
+              accordance with ISTC's applicable procedures and approval requirements.
+            </p>
+            <label class="option option-agree" data-error-anchor="dataAgree">
+              <input type="checkbox" name="dataAgree" value="I acknowledge and agree" />
+              <span class="option-check option-check-square" aria-hidden="true"></span>
+              <span class="option-body"><span class="option-title">I acknowledge and agree</span></span>
+            </label>
+            <p class="field-error" data-error-for="dataAgree" role="alert" hidden></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ STEP 11 · REVIEW ============ -->
+      <section class="step" data-step="11" hidden>
+        <div class="step-card">
+          <h2 class="step-title" tabindex="-1">Review &amp; Submit</h2>
+          <p class="step-subtitle">Please check your answers before submitting.</p>
+          <div id="reviewContent"></div>
+          <p class="field-error" id="submitError" role="alert" hidden></p>
+        </div>
+      </section>
+
+      <!-- ============ NAV ============ -->
+      <div class="step-nav" id="stepNav" hidden>
+        <button type="button" class="btn btn-ghost" id="backBtn">Back</button>
+        <button type="button" class="btn btn-primary" id="nextBtn">Continue</button>
+      </div>
+    </form>
+
+    <!-- ============ SUCCESS ============ -->
+    <section class="step step-success" data-step="success" hidden>
+      <div class="success-inner">
+        <div class="success-mark" aria-hidden="true">
+          <svg viewBox="0 0 64 64" fill="none">
+            <circle cx="32" cy="32" r="30" stroke="currentColor" stroke-width="3" class="success-circle" />
+            <path d="M20 33l8 8 16-17" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" class="success-tick" />
+          </svg>
+        </div>
+        <h2 class="success-title" tabindex="-1">Thank you</h2>
+        <p class="success-text">
+          Your Expression of Interest has been received. ISTC will contact you should a suitable
+          assignment arise. Inclusion in the Consultant Database does not guarantee a contract award.
+        </p>
+        <p class="success-text success-text-small">
+          You may request removal of your profile at any time by writing to
+          <a href="mailto:consulting.tenders@istc.int">consulting.tenders@istc.int</a>.
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <p>International Science and Technology Center</p>
+    <p>
+      Questions or data removal requests:
+      <a href="mailto:consulting.tenders@istc.int">consulting.tenders@istc.int</a>
+    </p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
