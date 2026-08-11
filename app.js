@@ -179,6 +179,15 @@ function attachAutocomplete(input, items, { onSelect } = {}) {
 
 /* ------------------------------------------------------------ Widget: files */
 
+/* The accept attribute only filters the picker dialog — a drag-and-dropped
+   file skips it entirely, so the same list is enforced here. */
+function fileMatchesAccept(name, accept) {
+  const exts = String(accept || '').split(',').map((s) => s.trim().toLowerCase()).filter((s) => s.startsWith('.'));
+  if (!exts.length) return true;
+  const lower = String(name || '').toLowerCase();
+  return exts.some((ext) => lower.endsWith(ext));
+}
+
 function initFileQuestion(q) {
   const zone = $(`.dropzone[data-file-key="${q.id}"]`);
   if (!zone) return;
@@ -202,6 +211,10 @@ function initFileQuestion(q) {
     const errEl = $(`[data-error-for="${q.id}"]`);
     if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
     if (!file) return;
+    if (!fileMatchesAccept(file.name, q.accept)) {
+      showError(q.id, `"${file.name}" is not an accepted format — please use ${q.accept.split(',').join(', ')}.`);
+      return;
+    }
     if (file.size > maxBytes) {
       showError(q.id, `"${file.name}" is ${formatBytes(file.size)} — the limit is ${q.maxMB || 10} MB.`);
       return;
@@ -535,15 +548,32 @@ allQuestions.forEach((q) => {
 
 /* ------------------------------------------------------------ Conditional questions */
 
+/* Conditions can chain (A reveals B, B reveals C), and a source that is
+   itself hidden must not keep driving its dependants with the value the
+   applicant typed before it disappeared. So: recompute until the set of
+   hidden questions stops changing, bounded by the chain depth. */
 function syncConditionals() {
+  const hidden = new Set();
+
+  for (let pass = 0; pass < allQuestions.length + 1; pass++) {
+    let changed = false;
+    allQuestions.forEach((q) => {
+      if (!q.showIf) return;
+      const source = questionById.get(q.showIf.question);
+      const sourceHidden = source ? hidden.has(source.id) : true;
+      const value = source && !sourceHidden ? adapterFor(source).get(source) : '';
+      const match = Array.isArray(value) ? value.includes(q.showIf.equals) : value === q.showIf.equals;
+      const wasHidden = hidden.has(q.id);
+      if (match === wasHidden) changed = true;
+      if (match) hidden.delete(q.id); else hidden.add(q.id);
+    });
+    if (!changed) break;
+  }
+
   allQuestions.forEach((q) => {
     if (!q.showIf) return;
     const host = $(`[data-question="${q.id}"]`);
-    if (!host) return;
-    const source = questionById.get(q.showIf.question);
-    const value = source ? adapterFor(source).get(source) : '';
-    const match = Array.isArray(value) ? value.includes(q.showIf.equals) : value === q.showIf.equals;
-    host.hidden = !match;
+    if (host) host.hidden = hidden.has(q.id);
   });
   // "Other" text boxes follow their choice group
   allQuestions.filter((q) => q.allowOther).forEach((q) => {
@@ -559,6 +589,9 @@ form.addEventListener('input', saveDraft);
 
 form.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
+  // Search boxes that feed a widget aren't answers — Enter there means
+  // "add what I typed", never "move to the next step".
+  if (e.target.hasAttribute('data-helper-input')) { e.preventDefault(); return; }
   if (e.target.matches('input:not([type="checkbox"]):not([type="radio"]):not([type="file"])')) {
     e.preventDefault();
     nextBtn.click();
@@ -734,6 +767,47 @@ syncConditionals();
 
 /* ------------------------------------------------------------ Review */
 
+/* Two renderings of the same answer, and the difference matters:
+
+   answerSummary() is for the on-screen review — compact, truncated,
+   "523 words" instead of the essay itself.
+   answerText() is what leaves the browser — the Excel file, the printable
+   copy and the submitted payload. It must never abbreviate, or ISTC
+   receives a word count where the applicant's expertise should be. */
+
+function answerText(q) {
+  const v = adapterFor(q).get(q);
+  if (q.type === 'file') {
+    const f = window.__formFiles[q.id];
+    return f ? `${f.name} (${formatBytes(f.size)})` : '';
+  }
+  if (q.type === 'country_map') return (v.names || []).join(', ');
+  if (q.type === 'languages') return v.map((l) => `${l.name} (${l.level})`).join(', ');
+  if (q.type === 'assignments') {
+    return v
+      .filter((a) => Object.values(a).some((x) => x && String(x).trim()))
+      .map((a, i) => {
+        const period = [a.from, a.to].filter(Boolean).join(' – ');
+        return [
+          `Assignment ${i + 1}`,
+          a.title && `Title: ${a.title}`,
+          a.client && `Client / organization: ${a.client}`,
+          a.country && `Country: ${a.country}`,
+          period && `Period: ${period}`,
+          a.role && `Role: ${a.role}`,
+          a.description && `Description: ${a.description}`,
+        ].filter(Boolean).join('\n');
+      })
+      .join('\n\n');
+  }
+  if (q.type === 'rate_pair') {
+    if (!v.daily && !v.hourly) return '';
+    return `€${v.daily || '—'} per day; €${v.hourly || '—'} per hour`;
+  }
+  if (Array.isArray(v)) return v.join('\n');
+  return v == null ? '' : String(v);
+}
+
 function answerSummary(q) {
   const v = adapterFor(q).get(q);
   if (q.type === 'file') {
@@ -747,7 +821,7 @@ function answerSummary(q) {
     return v.length ? v.map((l) => `${l.name} (${l.level})`).join(', ') : '—';
   }
   if (q.type === 'assignments') {
-    const filled = v.filter((a) => Object.values(a).some((x) => x && x.trim()));
+    const filled = v.filter((a) => Object.values(a).some((x) => x && String(x).trim()));
     return filled.length
       ? filled.map((a) => truncate([a.title || 'Untitled', a.client].filter(Boolean).join(' — '), 90)).join('\n')
       : '—';
@@ -773,13 +847,16 @@ function renderReview() {
       </div>
     </div>` : '';
 
-  const groups = schema.steps.map((step, i) => `
+  const groups = schema.steps
+    .map((step, i) => ({ step, i, visible: step.questions.filter(isQuestionVisible) }))
+    .filter((g) => g.visible.length) // a fully-hidden section has nothing to review
+    .map(({ step, i, visible }) => `
     <div class="review-group">
       <div class="review-group-head">
         <span class="review-group-title">${escapeHtml(step.title)}</span>
         <button type="button" class="review-edit" data-goto="${i + 1}">Edit</button>
       </div>
-      ${step.questions.filter(isQuestionVisible).map((q) => `
+      ${visible.map((q) => `
         <div class="review-row">
           <span class="review-key">${escapeHtml(q.title)}</span>
           <span class="review-val">${escapeHtml(answerSummary(q))}</span>
@@ -832,11 +909,11 @@ function fileToBase64(file) {
 }
 
 /* Answers grouped by section — the shape both the printable copy and the
-   workbook are built from. */
+   workbook are built from, so these carry the full text, not the summary. */
 function answerSections() {
   return schema.steps.map((step) => ({
     title: step.title,
-    rows: step.questions.filter(isQuestionVisible).map((q) => [q.title, answerSummary(q)]),
+    rows: step.questions.filter(isQuestionVisible).map((q) => [q.title, answerText(q) || '—']),
   })).filter((s) => s.rows.length);
 }
 
@@ -883,7 +960,7 @@ async function buildPayload() {
   }
   const answers = allQuestions
     .filter((q) => q.type !== 'file' && isQuestionVisible(q))
-    .map((q) => ({ id: q.id, title: q.title, value: answerSummary(q) }));
+    .map((q) => ({ id: q.id, title: q.title, type: q.type, value: answerText(q) }));
 
   // The workbook and the printable document travel with the submission so the
   // receiving flow can drop ready-made files into OneDrive without rebuilding

@@ -22,6 +22,7 @@ Expressions of Interest for the ISTC Consultant Database.
 | `landing.js` | Landing page behaviour: map tour, scroll reveals, header hairline |
 | `data.js` | Suggestion lists for autocomplete (countries, nationalities, languages) |
 | `apps-script/Code.gs` | Google Apps Script backend that stores submissions in a Google Sheet + Drive |
+| `tests/` | Test suites — see [Tests](#tests) |
 
 ## Editing the questions (admin panel)
 
@@ -40,6 +41,18 @@ Open **`admin.html`** — a Google-Forms-style editor. You can:
 - make a question **conditional** ("show only if … equals …");
 - **Preview** a section exactly as applicants will see it.
 
+The editor keeps conditions honest as you edit. Deleting a question warns you
+how many others depend on it and then makes them unconditional rather than
+leaving them hidden forever; renaming an option carries its conditions along;
+switching a question to a type without options clears conditions that pointed
+at it; and duplicating a section re-points conditions at the copy instead of
+the original.
+
+Whatever you publish or import passes through a repair step first. It fixes
+unsafe or duplicated question ids, unknown types, missing titles, empty option
+lists, non-numeric settings and dangling conditions — and tells you exactly
+what it changed rather than shipping a form that silently misbehaves.
+
 **Saving is not publishing.** Edits go to the editor's own browser storage as
 you type. Press **Publish…**, then commit the downloaded `form-schema.js` over
 the existing one — that is what changes the form for everyone. **Reset**
@@ -52,6 +65,46 @@ discards local edits and shows the published version again.
 
 The Apps Script backend derives its spreadsheet columns from each submission,
 so questions added in the editor appear as new columns automatically.
+
+## Tests
+
+105 tests, no dependencies and no build step.
+
+**Logic (30)** — schema repair, id generation, the publish/import round-trip,
+the xlsx writer and the printable document:
+
+```bash
+node tests/node-tests.mjs
+```
+
+**Browser (75)** — start a server, then open `/tests/`:
+
+```bash
+python3 -m http.server 4173
+```
+
+<http://localhost:4173/tests/> runs both browser suites and prints one total.
+Each is also a standalone page you can open and debug on its own:
+
+| Suite | Covers |
+| --- | --- |
+| `tests/tests.html` | Every adapter's `set(get())` round-trip (what a saved draft depends on), validation per type, escaping, and the live form in an iframe: conditional questions, draft restore across a reload, stepper completeness, review, exports, and a blocked submit |
+| `tests/admin-tests.html` | The editor itself: adding, retyping, deleting and duplicating questions and sections, option editing, conditional wiring, publishing, importing, and reset |
+
+Two things the suites take care of, because both have produced false passes here
+before:
+
+- **Cache.** `index.html` and `admin.html` pin their scripts with a fixed `?v=`
+  token, so a browser will happily run a cached copy of a file you just changed.
+  Each suite re-fetches every asset with `cache: 'reload'` before loading its
+  iframe.
+- **Isolation.** The editor and the form share `localStorage`. Each suite clears
+  the schema override and the draft before it starts, and restores the original
+  afterwards — and only if it still normalizes cleanly, so one bad run cannot
+  poison the next.
+
+The suites are checked against deliberately broken code (a fix reverted at a
+time) to confirm they actually fail when they should.
 
 ## Deploying
 
@@ -110,6 +163,10 @@ region quick-select chips and the regions recorded on submission.
 Applicants get both as buttons on the review page and again after submitting.
 Each submission also carries a ready-made workbook and the printable HTML, so
 the receiving flow can file them without regenerating anything.
+
+The review page abbreviates long answers ("523 words"), but everything that
+leaves the browser carries the answer in full — the whole summary, and every
+field of every assignment.
 
 ## ⚠️ Connect the backend (required before accepting submissions)
 
@@ -185,9 +242,8 @@ then open <http://localhost:4173>.
 
 ## Customizing
 
-- **Questions/options** — expertise and region lists live at the top of
-  `app.js` (`EXPERTISE_OPTIONS`, `GEOGRAPHY_OPTIONS`); everything else is
-  plain HTML in `index.html`.
-- **Word minimum / file size** — `CONFIG.MIN_SUMMARY_WORDS`,
-  `CONFIG.MAX_FILE_BYTES` in `app.js`.
+- **Questions, options, word minimums, file limits** — all of it lives in the
+  schema. Use `admin.html`; no code editing needed.
+- **The built-in default form** — `DEFAULT_SCHEMA` in `schema.js`, used when no
+  `form-schema.js` has been published.
 - **Colors** — CSS custom properties at the top of `styles.css`.

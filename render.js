@@ -84,7 +84,7 @@ const ADAPTERS = {
     set: (q, v) => { const el = document.getElementById(q.id); if (el) el.value = v ?? ''; },
     validate(q) {
       const v = this.get(q);
-      if (!v) return q.required ? `Please enter ${q.title.toLowerCase()}.` : null;
+      if (!v) return q.required ? `Please enter ${(q.title || 'this field').toLowerCase()}.` : null;
       if (q.pattern === 'name' && !/\p{L}.*\p{L}/u.test(v)) return q.patternMessage || 'Please enter a valid value.';
       if (q.pattern === 'letters' && !/^\p{L}[\p{L}\s'’.()\-]*$/u.test(v)) return q.patternMessage || 'Please enter a valid value.';
       return null;
@@ -170,8 +170,20 @@ const ADAPTERS = {
       return v === 'Other (specify)' && other?.value ? other.value.trim() : v;
     },
     set: (q, v) => {
-      const el = [...document.querySelectorAll(`input[name="${q.id}"]`)].find((i) => i.value === v);
-      if (el) el.checked = true;
+      if (!v) return;
+      const inputs = [...document.querySelectorAll(`input[name="${q.id}"]`)];
+      const el = inputs.find((i) => i.value === v);
+      if (el) { el.checked = true; return; }
+      // Drafts store the resolved "Other" text, not the sentinel value —
+      // without this branch a custom answer would vanish on restore.
+      const other = document.getElementById(`${q.id}__other`);
+      const otherInput = inputs.find((i) => i.value === 'Other (specify)');
+      if (q.allowOther && other && otherInput) {
+        otherInput.checked = true;
+        other.value = v;
+        const box = document.querySelector(`[data-other-for="${q.id}"]`);
+        if (box) box.hidden = false;
+      }
     },
     validate(q) {
       const chosen = document.querySelector(`input[name="${q.id}"]:checked`);
@@ -191,10 +203,22 @@ const ADAPTERS = {
       return vals.map((v) => (v === 'Other (specify)' && other?.value ? other.value.trim() : v));
     },
     set: (q, list) => {
+      const inputs = [...document.querySelectorAll(`input[name="${q.id}"]`)];
+      const unmatched = [];
       (list || []).forEach((v) => {
-        const el = [...document.querySelectorAll(`input[name="${q.id}"]`)].find((i) => i.value === v);
+        const el = inputs.find((i) => i.value === v);
         if (el) el.checked = true;
+        else if (v) unmatched.push(v);
       });
+      // A resolved "Other" answer won't match any box — restore it explicitly.
+      const other = document.getElementById(`${q.id}__other`);
+      const otherInput = inputs.find((i) => i.value === 'Other (specify)');
+      if (q.allowOther && unmatched.length && other && otherInput) {
+        otherInput.checked = true;
+        other.value = unmatched[0];
+        const box = document.querySelector(`[data-other-for="${q.id}"]`);
+        if (box) box.hidden = false;
+      }
     },
     validate(q) {
       const checked = document.querySelectorAll(`input[name="${q.id}"]:checked`);
@@ -249,7 +273,7 @@ const ADAPTERS = {
         <div class="rate-input">
           ${q.prefix ? `<span class="rate-prefix" aria-hidden="true">${esc(q.prefix)}</span>` : ''}
           <input class="text-input" type="number" id="${esc(q.id)}" name="${esc(q.id)}"
-                 ${q.min != null ? `min="${esc(q.min)}"` : ''} inputmode="numeric" placeholder="0" />
+                 ${q.min != null ? `min="${esc(q.min)}"` : ''} ${q.max != null ? `max="${esc(q.max)}"` : ''} inputmode="numeric" placeholder="0" />
           ${q.suffix ? `<span class="rate-suffix" aria-hidden="true">${esc(q.suffix)}</span>` : ''}
         </div>
         ${errorSlot(q)}`;
@@ -258,7 +282,7 @@ const ADAPTERS = {
     set: (q, v) => { const el = document.getElementById(q.id); if (el) el.value = v ?? ''; },
     validate(q) {
       const v = this.get(q);
-      if (!v) return q.required ? `Please enter ${q.title.toLowerCase()}.` : null;
+      if (!v) return q.required ? `Please enter ${(q.title || 'this field').toLowerCase()}.` : null;
       if (q.min != null && Number(v) < Number(q.min)) return `Must be at least ${q.min}.`;
       if (q.max != null && Number(v) > Number(q.max)) return `Must be at most ${q.max}.`;
       return null;
@@ -324,7 +348,8 @@ const ADAPTERS = {
     },
     get: () => null, // files live outside the serialisable answer set
     set: () => {},
-    validate: (q) => (q.required && !window.__formFiles?.[q.id] ? `Please upload ${q.title.toLowerCase()}.` : null),
+    validate: (q) => (q.required && !window.__formFiles?.[q.id]
+      ? `Please upload ${(q.title || 'this file').toLowerCase()}.` : null),
   },
 
   country_map: {
@@ -334,7 +359,7 @@ const ADAPTERS = {
         <div class="picker" data-error-anchor="${esc(q.id)}">
           <div class="picker-toolbar">
             <div class="picker-search combo-anchor">
-              <input type="text" id="${esc(q.id)}__search" placeholder="Search for a country…" autocomplete="off" aria-label="Search for a country to add" />
+              <input type="text" id="${esc(q.id)}__search" data-helper-input placeholder="Search for a country…" autocomplete="off" aria-label="Search for a country to add" />
             </div>
             <button type="button" class="picker-clear" data-clear-for="${esc(q.id)}" hidden>Clear all</button>
           </div>
@@ -365,7 +390,7 @@ const ADAPTERS = {
         <div class="text-input chip-field has-ico" data-error-anchor="${esc(q.id)}" data-lang-for="${esc(q.id)}">
           ${ico('translate', 'input-ico input-ico-static')}
           <span data-lang-chips="${esc(q.id)}"></span>
-          <input type="text" id="${esc(q.id)}__input" placeholder="Type a language…" autocomplete="off" />
+          <input type="text" id="${esc(q.id)}__input" data-helper-input placeholder="Type a language…" autocomplete="off" />
         </div>
         ${errorSlot(q)}`;
     },
@@ -437,6 +462,8 @@ const ADAPTERS = {
     },
     validate(q) {
       const { daily, hourly } = this.get(q);
+      // Optional and untouched → fine; but a half-filled pair is never fine.
+      if (!q.required && !daily && !hourly) return null;
       if (!daily || Number(daily) <= 0) return 'Please enter your daily rate.';
       if (!hourly || Number(hourly) <= 0) return 'Please enter your hourly rate.';
       return null;

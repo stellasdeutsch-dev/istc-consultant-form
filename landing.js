@@ -15,11 +15,15 @@
 
   const stats = {
     steps: () => (typeof schema !== 'undefined' ? schema.steps.length + 1 : null),
+    /* The headline "N domains of expertise" must match the question the
+       applicant actually meets. Prefer the question that still carries the
+       expertise id; only if an admin renamed it do we fall back to the
+       longest option list, which is what that question has always been. */
     'expertise-options': () => {
       if (typeof schema === 'undefined') return null;
-      const q = schema.steps.flatMap((s) => s.questions)
-        .filter((x) => Array.isArray(x.options))
-        .sort((a, b) => b.options.length - a.options.length)[0];
+      const all = schema.steps.flatMap((s) => s.questions).filter((x) => Array.isArray(x.options));
+      const named = all.find((x) => x.id === 'expertise');
+      const q = named || all.slice().sort((a, b) => b.options.length - a.options.length)[0];
       return q ? q.options.length : null;
     },
   };

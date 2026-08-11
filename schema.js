@@ -236,24 +236,172 @@ const DEFAULT_SCHEMA = {
   ],
 };
 
+/* ------------------------------------------------------------ Normalization
+
+   Schemas arrive from places we don't control — localStorage that an old
+   version wrote, JSON pasted into the admin import box, a hand-edited
+   form-schema.js. Everything downstream (render.js, app.js, admin.js)
+   assumes a well-formed shape, so this is the single choke point that
+   repairs anything repairable and reports what it changed. */
+
+const CHOICE_TYPES = ['radio', 'checkbox', 'dropdown', 'scale'];
+
+/* ids are interpolated into querySelector strings and DOM ids, so they
+   must stay strictly [A-Za-z0-9_-]. */
+function sanitizeId(raw) {
+  return String(raw ?? '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64);
+}
+
+function ensureUniqueId(base, taken) {
+  let id = base || 'q';
+  let n = 2;
+  while (taken.has(id)) id = `${base}_${n++}`;
+  taken.add(id);
+  return id;
+}
+
+function coerceNumber(value) {
+  if (value === '' || value == null) return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+/* Returns { schema, issues } — schema is always safe to render, issues is
+   a human-readable list of every repair that was made. */
+function normalizeSchema(input) {
+  const issues = [];
+  const src = input && typeof input === 'object' ? deepClone(input) : null;
+  if (!src || !Array.isArray(src.steps) || !src.steps.length) {
+    return { schema: deepClone(DEFAULT_SCHEMA), issues: ['Schema was empty or malformed — using the default form.'] };
+  }
+
+  const schema = {
+    version: coerceNumber(src.version) ?? 1,
+    title: typeof src.title === 'string' && src.title.trim() ? src.title : DEFAULT_SCHEMA.title,
+    description: typeof src.description === 'string' ? src.description : '',
+    steps: [],
+  };
+
+  /* Sections and questions are separate namespaces: a section id never
+     reaches the DOM, while a question id becomes an element id and a
+     showIf target. Sharing one set would rename innocent questions. */
+  const takenStepIds = new Set();
+  const takenIds = new Set();
+
+  src.steps.forEach((rawStep, si) => {
+    if (!rawStep || typeof rawStep !== 'object') {
+      issues.push(`Section ${si + 1} was not an object — removed.`);
+      return;
+    }
+    const step = {
+      id: ensureUniqueId(sanitizeId(rawStep.id) || `s_${si + 1}`, takenStepIds),
+      title: typeof rawStep.title === 'string' && rawStep.title.trim() ? rawStep.title : `Section ${si + 1}`,
+      subtitle: typeof rawStep.subtitle === 'string' ? rawStep.subtitle : '',
+      icon: typeof rawStep.icon === 'string' ? rawStep.icon : 'layers',
+      navLabel: typeof rawStep.navLabel === 'string' && rawStep.navLabel.trim() ? rawStep.navLabel : undefined,
+      questions: [],
+    };
+    if (rawStep.wide) step.wide = true;
+    if (!rawStep.title || !String(rawStep.title).trim()) issues.push(`Section ${si + 1} had no title.`);
+
+    const rawQuestions = Array.isArray(rawStep.questions) ? rawStep.questions : [];
+    if (!Array.isArray(rawStep.questions)) issues.push(`Section “${step.title}” had no questions array.`);
+
+    rawQuestions.forEach((rawQ, qi) => {
+      if (!rawQ || typeof rawQ !== 'object') {
+        issues.push(`Question ${qi + 1} in “${step.title}” was not an object — removed.`);
+        return;
+      }
+      const q = { ...rawQ };
+      delete q.__open; // admin UI state, never part of the form
+
+      const cleanId = sanitizeId(q.id);
+      if (cleanId !== String(q.id ?? '')) issues.push(`Question id “${q.id}” contained unsafe characters — now “${cleanId || '(generated)'}”.`);
+      q.id = ensureUniqueId(cleanId || `q_${si + 1}_${qi + 1}`, takenIds);
+      if (q.id !== cleanId && cleanId) issues.push(`Duplicate question id “${cleanId}” — renamed to “${q.id}”.`);
+
+      if (typeof q.title !== 'string' || !q.title.trim()) {
+        issues.push(`Question “${q.id}” had no title.`);
+        q.title = 'Untitled question';
+      }
+      if (!QUESTION_TYPES[q.type]) {
+        issues.push(`Question “${q.title}” had unknown type “${q.type}” — treated as short answer.`);
+        q.type = 'short_text';
+      }
+
+      if (CHOICE_TYPES.includes(q.type)) {
+        const opts = (Array.isArray(q.options) ? q.options : [])
+          .map((o) => (typeof o === 'string' ? { value: o, label: o } : o))
+          .filter((o) => o && typeof o === 'object' && String(o.value ?? o.label ?? '').trim())
+          .map((o) => ({ ...o, value: String(o.value ?? o.label), label: String(o.label ?? o.value) }));
+        if (!opts.length) {
+          issues.push(`Choice question “${q.title}” had no options — added a placeholder.`);
+          opts.push({ value: 'Option 1', label: 'Option 1' });
+        }
+        q.options = opts;
+      } else if ('options' in q && q.type !== 'country_map') {
+        delete q.options;
+      }
+
+      ['minWords', 'maxMB', 'maxItems', 'min', 'max'].forEach((key) => {
+        if (key in q) {
+          const n = coerceNumber(q[key]);
+          if (n === undefined) { issues.push(`Question “${q.title}”: ${key} was not a number — removed.`); delete q[key]; }
+          else q[key] = n;
+        }
+      });
+
+      q.required = !!q.required;
+      step.questions.push(q);
+    });
+
+    schema.steps.push(step);
+  });
+
+  if (!schema.steps.length) {
+    return { schema: deepClone(DEFAULT_SCHEMA), issues: [...issues, 'No usable sections were left — using the default form.'] };
+  }
+
+  /* Second pass: showIf may point forward, so it can only be checked once
+     every surviving question id is known. A dangling condition would hide
+     the question forever — dropping it (always show) is the safe repair. */
+  const allIds = new Set(schema.steps.flatMap((s) => s.questions.map((q) => q.id)));
+  schema.steps.forEach((s) => s.questions.forEach((q) => {
+    if (!q.showIf) return;
+    const ok = q.showIf && typeof q.showIf === 'object'
+      && typeof q.showIf.question === 'string' && allIds.has(q.showIf.question)
+      && q.showIf.question !== q.id && typeof q.showIf.equals === 'string';
+    if (!ok) {
+      issues.push(`Question “${q.title}”: its “show only if” pointed at a missing question — it is now always shown.`);
+      delete q.showIf;
+    }
+  }));
+
+  return { schema, issues };
+}
+
 /* ------------------------------------------------------------ Storage */
 
 /* Precedence: this browser's unpublished edits → the published
-   form-schema.js committed to the repo → the built-in default. */
+   form-schema.js committed to the repo → the built-in default.
+   Whatever wins is normalized, so downstream code never sees a
+   malformed schema. */
 function loadSchema() {
+  let candidate = null;
   try {
     const raw = localStorage.getItem(SCHEMA_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.steps) && parsed.steps.length) return parsed;
+      if (parsed && Array.isArray(parsed.steps) && parsed.steps.length) candidate = parsed;
     }
   } catch (_) { /* fall through */ }
 
-  const published = typeof window !== 'undefined' ? window.PUBLISHED_SCHEMA : null;
-  if (published && Array.isArray(published.steps) && published.steps.length) {
-    return deepClone(published);
+  if (!candidate) {
+    const published = typeof window !== 'undefined' ? window.PUBLISHED_SCHEMA : null;
+    if (published && Array.isArray(published.steps) && published.steps.length) candidate = published;
   }
-  return deepClone(DEFAULT_SCHEMA);
+
+  return normalizeSchema(candidate || DEFAULT_SCHEMA).schema;
 }
 
 function clearSchemaOverride() {
@@ -268,9 +416,17 @@ function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+/* Timestamp alone is not enough — duplicating twice in the same
+   millisecond must still give distinct ids, hence the counter. */
+let __uidCounter = 0;
+function uid(prefix) {
+  __uidCounter += 1;
+  return `${prefix}_${Date.now().toString(36)}${__uidCounter.toString(36)}`;
+}
+
 function newQuestion(type = 'short_text') {
   const q = {
-    id: `q_${Math.abs(Date.now() % 1e9).toString(36)}${Math.floor(performance.now() % 1000)}`,
+    id: uid('q'),
     type,
     title: 'Untitled question',
     required: false,
@@ -289,11 +445,20 @@ function newQuestion(type = 'short_text') {
 
 function newStep() {
   return {
-    id: `s_${Math.abs(Date.now() % 1e9).toString(36)}`,
+    id: uid('s'),
     title: 'Untitled section',
     subtitle: '',
     icon: 'layers',
     navLabel: 'Section',
     questions: [newQuestion('short_text')],
+  };
+}
+
+/* Node (tests) — browsers ignore this block. */
+if (typeof module !== 'undefined') {
+  module.exports = {
+    SCHEMA_STORAGE_KEY, QUESTION_TYPES, DEFAULT_SCHEMA, CHOICE_TYPES,
+    normalizeSchema, sanitizeId, ensureUniqueId, coerceNumber,
+    loadSchema, saveSchema, clearSchemaOverride, deepClone, uid, newQuestion, newStep,
   };
 }

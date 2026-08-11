@@ -27,6 +27,32 @@ themeToggle.addEventListener('click', () => {
 
 /* ------------------------------------------------------------ persistence */
 
+/* Every id currently in the schema — duplicated sections/questions must
+   pick ids that collide with none of them. */
+function allSchemaIds() {
+  const ids = new Set();
+  schema.steps.forEach((s) => { ids.add(s.id); s.questions.forEach((q) => ids.add(q.id)); });
+  return ids;
+}
+
+/* A deleted question may be the source of other questions' "show only if".
+   Left dangling, those questions would be hidden forever on the live form. */
+function dropDanglingShowIf(removedIds) {
+  schema.steps.forEach((s) => s.questions.forEach((q) => {
+    if (q.showIf && removedIds.has(q.showIf.question)) delete q.showIf;
+  }));
+}
+
+/* Renaming an option must follow through to conditions that match on it. */
+function renameShowIfValue(sourceQuestionId, oldValue, newValue) {
+  if (oldValue === newValue) return;
+  schema.steps.forEach((s) => s.questions.forEach((q) => {
+    if (q.showIf && q.showIf.question === sourceQuestionId && q.showIf.equals === oldValue) {
+      q.showIf.equals = newValue;
+    }
+  }));
+}
+
 let savedTimer = null;
 function persist() {
   saveSchema(schema);
@@ -60,19 +86,34 @@ $('#sectionList').addEventListener('click', (e) => {
   if (dup) {
     const i = Number(dup.dataset.dupSection);
     const copy = deepClone(schema.steps[i]);
-    copy.id = `${copy.id}_copy_${Date.now().toString(36)}`;
+    const taken = allSchemaIds();
+    copy.id = ensureUniqueId(`${copy.id}_copy`, taken);
     copy.title = `${copy.title} (copy)`;
-    copy.questions.forEach((q) => { q.id = `${q.id}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`; });
+    // Re-point conditions that referenced a sibling inside this section at
+    // the sibling's copy; conditions on questions elsewhere stay as they are.
+    const remap = new Map();
+    copy.questions.forEach((q) => {
+      const fresh = ensureUniqueId(`${q.id}_copy`, taken);
+      remap.set(q.id, fresh);
+      q.id = fresh;
+    });
+    copy.questions.forEach((q) => {
+      if (q.showIf && remap.has(q.showIf.question)) q.showIf.question = remap.get(q.showIf.question);
+    });
     schema.steps.splice(i + 1, 0, copy);
     activeSection = i + 1;
+    persist();
     return renderAll();
   }
   if (del) {
     const i = Number(del.dataset.delSection);
     if (schema.steps.length === 1) return alert('A form needs at least one section.');
     if (!confirm(`Delete section “${schema.steps[i].title}” and its ${schema.steps[i].questions.length} question(s)?`)) return;
+    const removedIds = new Set(schema.steps[i].questions.map((q) => q.id));
     schema.steps.splice(i, 1);
+    dropDanglingShowIf(removedIds);
     activeSection = Math.max(0, Math.min(activeSection, schema.steps.length - 1));
+    persist();
     return renderAll();
   }
   if (item) { activeSection = Number(item.dataset.section); renderAll(); }
@@ -81,6 +122,7 @@ $('#sectionList').addEventListener('click', (e) => {
 $('#addSectionBtn').addEventListener('click', () => {
   schema.steps.push(newStep());
   activeSection = schema.steps.length - 1;
+  persist();
   renderAll();
 });
 
@@ -106,6 +148,7 @@ $('#sectionList').addEventListener('dragover', (e) => {
   schema.steps.splice(to, 0, moved);
   activeSection = to;
   dragSection = to;
+  persist();
   renderAll();
 });
 
@@ -218,6 +261,12 @@ function questionSettings(q, qi) {
     bits.push(settingRow('Prefix', `<input class="admin-input" data-q="${qi}" data-set="prefix" value="${esc2(q.prefix || '')}" />`));
     bits.push(settingRow('Suffix', `<input class="admin-input" data-q="${qi}" data-set="suffix" value="${esc2(q.suffix || '')}" />`));
   }
+  if (fields.includes('min')) {
+    bits.push(settingRow('Minimum value',
+      `<input class="admin-input" type="number" data-q="${qi}" data-set="min" value="${esc2(q.min ?? '')}" />`));
+    bits.push(settingRow('Maximum value',
+      `<input class="admin-input" type="number" data-q="${qi}" data-set="max" value="${esc2(q.max ?? '')}" />`));
+  }
   if (fields.includes('body')) {
     bits.push(`<label class="setting setting-wide"><span>Statement text</span>
       <textarea class="admin-input" rows="4" data-q="${qi}" data-set="body">${esc2(q.body || '')}</textarea></label>`);
@@ -309,10 +358,18 @@ list.addEventListener('input', (e) => {
 
   if (el.dataset.set) {
     const key = el.dataset.set;
+    // The showIf selects have their own handler below; letting the generic
+    // one see them would write stray showIfQuestion/showIfEquals keys.
+    if (key === 'showIfQuestion' || key === 'showIfEquals') return;
+
     let value = el.type === 'checkbox' ? el.checked : el.value;
-    if (['minWords', 'maxMB', 'maxItems'].includes(key)) value = value === '' ? undefined : Number(value);
-    if (value === '' || value === false) delete q[key]; else q[key] = value;
-    if (key === 'title') { /* live label only */ }
+    if (['minWords', 'maxMB', 'maxItems', 'min', 'max'].includes(key)) {
+      value = value === '' ? undefined : Number(value);
+      if (Number.isNaN(value)) value = undefined; // never persist NaN
+    }
+    // title is not optional — code downstream builds error messages from it
+    if (key === 'title') { q.title = String(value || ''); persist(); return; }
+    if (value === '' || value === false || value === undefined) delete q[key]; else q[key] = value;
     persist();
     return;
   }
@@ -320,7 +377,11 @@ list.addEventListener('input', (e) => {
   if (el.dataset.opt != null && el.dataset.k) {
     const opt = q.options[Number(el.dataset.opt)];
     const k = el.dataset.k;
-    if (k === 'label') { opt.label = el.value; opt.value = el.value; }
+    if (k === 'label') {
+      const oldValue = opt.value;
+      opt.label = el.value; opt.value = el.value;
+      renameShowIfValue(q.id, oldValue, el.value);
+    }
     else if (el.value) opt[k] = el.value;
     else delete opt[k];
     persist();
@@ -335,12 +396,32 @@ list.addEventListener('change', (e) => {
   const q = step.questions[qi];
 
   if (el.hasAttribute('data-type-select')) {
+    const nextFields = QUESTION_TYPES[el.value]?.fields || [];
+    const losesOptions = q.options?.length > 1 && !nextFields.includes('options');
+    if (losesOptions && !confirm(`“${el.value}” has no options — the ${q.options.length} options on this question will be removed. Continue?`)) {
+      el.value = q.type; // put the dropdown back
+      return;
+    }
     q.type = el.value;
-    const needsOptions = (QUESTION_TYPES[q.type]?.fields || []).includes('options');
+    const fields = nextFields;
+    const needsOptions = fields.includes('options');
     if (needsOptions && !q.options?.length) q.options = [{ value: 'Option 1', label: 'Option 1' }];
     if (!needsOptions) delete q.options;
     if (q.type === 'statement') { q.body = q.body || 'Statement text'; q.consentLabel = q.consentLabel || 'I agree'; }
-    persist(); renderQuestions();
+    // Strip settings that belong to the previous type, so a paragraph
+    // switched to multiple choice doesn't publish a stale minWords etc.
+    const keep = new Set(fields.flatMap((f) => (
+      f === 'pattern' ? ['pattern', 'patternMessage']
+        : f === 'prefix' ? ['prefix', 'suffix', 'min', 'max']
+          : f === 'body' ? ['body', 'consentLabel'] : [f])));
+    if (q.type === 'scale') keep.add('caption');
+    ['placeholder', 'source', 'pattern', 'patternMessage', 'minWords', 'layout', 'allowOther',
+      'maxMB', 'accept', 'maxItems', 'prefix', 'suffix', 'min', 'max', 'body', 'consentLabel', 'caption']
+      .forEach((key) => { if (!keep.has(key)) delete q[key]; });
+    // Only choice questions can drive a condition — losing the options
+    // makes every condition pointing here unsatisfiable.
+    if (!needsOptions) dropDanglingShowIf(new Set([q.id]));
+    persist(); renderAll();
     return;
   }
 
@@ -374,6 +455,7 @@ list.addEventListener('click', (e) => {
   const delOpt = t('[data-del-opt]');
   if (delOpt) {
     const q = step.questions[Number(delOpt.dataset.q)];
+    if (q.options.length === 1) return alert('A choice question needs at least one option.');
     q.options.splice(Number(delOpt.dataset.delOpt), 1);
     persist(); renderQuestions(); return;
   }
@@ -387,7 +469,7 @@ list.addEventListener('click', (e) => {
   if (dup) {
     const i = Number(dup.dataset.dupQ);
     const copy = deepClone(step.questions[i]);
-    copy.id = `${copy.id}_${Date.now().toString(36)}`;
+    copy.id = ensureUniqueId(`${copy.id}_copy`, allSchemaIds());
     copy.title = `${copy.title} (copy)`;
     step.questions.splice(i + 1, 0, copy);
     persist(); renderAll(); return;
@@ -395,8 +477,15 @@ list.addEventListener('click', (e) => {
   const del = t('[data-del-q]');
   if (del) {
     const i = Number(del.dataset.delQ);
-    if (!confirm(`Delete question “${step.questions[i].title}”?`)) return;
+    const target = step.questions[i];
+    const dependents = schema.steps.flatMap((s) => s.questions)
+      .filter((o) => o.showIf?.question === target.id);
+    const warning = dependents.length
+      ? `\n\n${dependents.length} other question(s) are shown based on this one — they will become always visible.`
+      : '';
+    if (!confirm(`Delete question “${target.title}”?${warning}`)) return;
     step.questions.splice(i, 1);
+    dropDanglingShowIf(new Set([target.id]));
     persist(); renderAll();
   }
 });
@@ -407,9 +496,13 @@ $('#addQuestionBtn').addEventListener('click', () => {
   list.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 });
 
-/* Drag to reorder questions */
+/* Drag to reorder questions. Option rows live inside question cards and
+   both handlers listen on the same node, so a drag that starts on an
+   option row must never be treated as a question drag — stopPropagation
+   can't help between listeners on one element. */
 let dragQ = null;
 list.addEventListener('dragstart', (e) => {
+  if (e.target.closest('.opt-row')) return; // option drag — handled below
   const card = e.target.closest('.q-card');
   if (!card) return;
   dragQ = Number(card.dataset.q);
@@ -435,7 +528,11 @@ list.addEventListener('dragover', (e) => {
 /* Option reorder */
 list.addEventListener('dragstart', (e) => {
   const row = e.target.closest('.opt-row');
-  if (row) { e.stopPropagation(); row.dataset.dragging = '1'; }
+  if (row) row.dataset.dragging = '1';
+});
+list.addEventListener('dragend', () => {
+  // A drop that never matched a target would leave the marker behind
+  $$('.opt-row[data-dragging]', list).forEach((r) => delete r.dataset.dragging);
 });
 list.addEventListener('dragover', (e) => {
   const row = e.target.closest('.opt-row');
@@ -467,9 +564,17 @@ $('#closePreview').addEventListener('click', () => { $('#previewModal').hidden =
 
 /* ------------------------------------------------------------ import / export */
 
-function cleanSchema() {
-  const clean = deepClone(schema);
-  clean.steps.forEach((s) => s.questions.forEach((q) => { delete q.__open; }));
+/* Normalization strips editor-only state (__open), repairs anything
+   repairable, and reports what it fixed — publishing a broken definition
+   silently is the one thing this editor must never do. */
+function cleanSchema({ confirmIssues = false } = {}) {
+  const { schema: clean, issues } = normalizeSchema(schema);
+  if (confirmIssues && issues.length) {
+    const ok = confirm(`The form definition needed ${issues.length} repair(s):\n\n`
+      + issues.map((s) => `• ${s}`).join('\n')
+      + '\n\nContinue with the repaired version?');
+    if (!ok) return null;
+  }
   return clean;
 }
 
@@ -484,14 +589,17 @@ function download(filename, text, mime) {
 /* Publish → a drop-in replacement for form-schema.js. It is a script rather
    than raw JSON so the form can read it synchronously, before rendering. */
 $('#exportBtn').addEventListener('click', () => {
+  const clean = cleanSchema({ confirmIssues: true });
+  if (!clean) return;
   const body = `/* Published form definition — generated by admin.html.\n`
     + `   Commit this file to make the changes live for everyone. */\n\n`
-    + `window.PUBLISHED_SCHEMA = ${JSON.stringify(cleanSchema(), null, 2)};\n`;
+    + `window.PUBLISHED_SCHEMA = ${JSON.stringify(clean, null, 2)};\n`;
   download('form-schema.js', body, 'application/javascript');
 });
 
 $('#exportJsonBtn').addEventListener('click', () => {
-  download('form-schema.json', JSON.stringify(cleanSchema(), null, 2), 'application/json');
+  const clean = cleanSchema({ confirmIssues: true });
+  if (clean) download('form-schema.json', JSON.stringify(clean, null, 2), 'application/json');
 });
 
 $('#importBtn').addEventListener('click', () => {
@@ -512,13 +620,14 @@ $('#doImport').addEventListener('click', () => {
     if (!parsed || !Array.isArray(parsed.steps) || !parsed.steps.length) {
       throw new Error('JSON must contain a non-empty "steps" array.');
     }
-    parsed.steps.forEach((s, i) => {
-      if (!Array.isArray(s.questions)) throw new Error(`Section ${i + 1} has no "questions" array.`);
-    });
-    schema = parsed;
+    const { schema: normalized, issues } = normalizeSchema(parsed);
+    schema = normalized;
     activeSection = 0;
     persist(); renderAll();
     $('#importModal').hidden = true;
+    if (issues.length) {
+      alert(`Imported with ${issues.length} repair(s):\n\n${issues.map((s) => `• ${s}`).join('\n')}`);
+    }
   } catch (e) {
     err.textContent = `Could not import: ${e.message}`;
     err.hidden = false;

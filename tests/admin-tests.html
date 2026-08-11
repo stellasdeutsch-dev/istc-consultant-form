@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ISTC question editor — tests</title>
+<style>
+  body { font: 14px/1.55 -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 24px;
+         background: #f6f8fb; color: #14202f; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #6b7889; margin: 0 0 18px; }
+  #summary { position: sticky; top: 0; background: #fff; border: 1px solid #dde3ec; border-radius: 10px;
+             padding: 12px 14px; font-weight: 700; margin-bottom: 14px; z-index: 5; }
+  #summary.pass { border-color: #1f8a4c; color: #1f8a4c; }
+  #summary.fail { border-color: #c0392b; color: #c0392b; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: #6b7889; margin: 18px 0 6px; }
+  .t { padding: 3px 0 3px 22px; position: relative; }
+  .t.ok::before { content: "✓"; color: #1f8a4c; position: absolute; left: 2px; }
+  .t.no::before { content: "✗"; color: #c0392b; position: absolute; left: 2px; }
+  .t.no { color: #c0392b; }
+  .why { color: #c0392b; font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; margin: 2px 0 6px; }
+  iframe { position: absolute; left: -10000px; top: 0; width: 1400px; height: 1000px; border: 0; }
+</style>
+</head>
+<body>
+
+<h1>ISTC question editor — tests</h1>
+<p class="sub">Drives the real admin.html: adding, retyping, deleting, duplicating, conditions, and publishing.</p>
+<div id="summary">Running…</div>
+<div id="out"></div>
+
+<iframe id="admin"></iframe>
+
+<script src="../schema.js"></script>
+<script>
+'use strict';
+
+let passed = 0;
+const failed = [];
+const out = document.getElementById('out');
+
+function group(name) {
+  const h = document.createElement('h2');
+  h.textContent = name;
+  out.appendChild(h);
+}
+
+async function test(name, fn) {
+  const row = document.createElement('div');
+  row.className = 't';
+  row.textContent = name;
+  out.appendChild(row);
+  try {
+    await fn();
+    row.classList.add('ok');
+    passed += 1;
+  } catch (err) {
+    row.classList.add('no');
+    const why = document.createElement('div');
+    why.className = 'why';
+    why.textContent = err && err.stack ? err.stack.split('\n').slice(0, 3).join('\n') : String(err);
+    out.appendChild(why);
+    failed.push({ name, err: String(err && err.message || err) });
+  }
+}
+
+function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed'); }
+function eq(a, b, msg) {
+  const x = JSON.stringify(a); const y = JSON.stringify(b);
+  if (x !== y) throw new Error(`${msg || 'not equal'}\n  actual:   ${x}\n  expected: ${y}`);
+}
+
+const frame = document.getElementById('admin');
+const STORAGE_KEY = 'istc-form-schema-v1';
+
+/* The editor writes to the same localStorage key the live form reads. These
+   tests deliberately break the schema in storage, so the original is handed
+   back at the end — but only if it still describes a usable form, otherwise
+   a failed earlier run would keep re-poisoning every later one. */
+const preexisting = localStorage.getItem(STORAGE_KEY);
+
+function restoreStorage() {
+  localStorage.removeItem(STORAGE_KEY);
+  if (!preexisting) return;
+  try {
+    if (normalizeSchema(JSON.parse(preexisting)).issues.length === 0) {
+      localStorage.setItem(STORAGE_KEY, preexisting);
+    }
+  } catch (_) { /* drop it */ }
+}
+
+/* admin.html loads its scripts with a fixed ?v= token, so the browser will
+   happily hand the iframe a cached copy of code that has since changed on
+   disk — tests then pass against the old file. Re-fetching each script with
+   cache:'reload' replaces those cache entries before the iframe loads. */
+const ASSETS = ['schema.js', 'data.js', 'icons.js', 'render.js', 'admin.js', 'admin.css', 'admin.html'];
+
+async function primeCache() {
+  const token = '?v=2026-08-11a';
+  await Promise.all(ASSETS.map((f) => fetch(`../${f}${f.endsWith('.html') ? '' : token}`, { cache: 'reload' })));
+}
+
+async function bootAdmin() {
+  await primeCache();
+  return new Promise((resolve) => {
+    frame.addEventListener('load', () => setTimeout(() => {
+      const w = frame.contentWindow;
+      // The editor asks for confirmation before destructive edits; the tests
+      // answer for the user, and record what they were asked.
+      w.__answers = [];
+      w.__alerts = [];
+      w.confirm = (msg) => { w.__answers.push(msg); return w.__confirmWith !== false; };
+      w.alert = (msg) => { w.__alerts.push(msg); };
+      w.__confirmWith = true;
+      resolve({ w, d: frame.contentDocument });
+    }, 250), { once: true });
+    frame.src = `../admin.html?t=${Date.now()}`;
+  });
+}
+
+function reset(w) {
+  // Start every test from the published/default schema, not the previous test
+  w.eval(`
+    clearSchemaOverride();
+    schema = loadSchema();
+    activeSection = 0;
+    renderAll();
+  `);
+}
+
+const q = (w, path) => JSON.parse(w.eval(`JSON.stringify(${path})`));
+
+(async function run() {
+  try {
+  localStorage.removeItem(STORAGE_KEY);
+  const { w, d } = await bootAdmin();
+  const ev = (el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true }));
+
+  /* ---------------------------------------------------------- boot */
+
+  group('Editor boots');
+
+  await test('the editor loads the schema and lists every section', () => {
+    reset(w);
+    const steps = w.eval('schema.steps.length');
+    assert(steps > 0, 'no sections');
+    eq(d.querySelectorAll('#sectionList .section-item').length, steps, 'section list length');
+    eq(d.querySelectorAll('#questionList .q-card').length,
+      w.eval('schema.steps[0].questions.length'), 'question card count');
+  });
+
+  await test('every question type is offered in the type dropdown', () => {
+    const offered = [...d.querySelectorAll('#questionList .q-type option')].map((o) => o.value);
+    const known = Object.keys(w.eval('QUESTION_TYPES') ? QUESTION_TYPES : {});
+    known.forEach((t) => assert(offered.includes(t), `type "${t}" missing from the dropdown`));
+  });
+
+  /* ---------------------------------------------------------- adding */
+
+  group('Adding and editing');
+
+  await test('adding a question appends it with a unique id', () => {
+    reset(w);
+    const before = w.eval('schema.steps[0].questions.length');
+    d.querySelector('#addQuestionBtn').click();
+    d.querySelector('#addQuestionBtn').click();
+    eq(w.eval('schema.steps[0].questions.length'), before + 2, 'two questions should have been added');
+    const ids = q(w, 'schema.steps.flatMap(s => s.questions.map(x => x.id))');
+    eq(new Set(ids).size, ids.length, 'duplicate ids after adding');
+  });
+
+  await test('editing a title updates the schema and survives being cleared', () => {
+    reset(w);
+    const input = d.querySelector('#questionList .q-card[data-q="0"] .q-title');
+    input.value = 'Renamed question';
+    ev(input, 'input');
+    eq(w.eval('schema.steps[0].questions[0].title'), 'Renamed question', 'title not stored');
+
+    input.value = '';
+    ev(input, 'input');
+    eq(w.eval('typeof schema.steps[0].questions[0].title'), 'string',
+      'clearing the title must leave a string, not delete the key');
+  });
+
+  await test('a blank title is repaired at publish time rather than shipped', () => {
+    const issues = q(w, 'normalizeSchema(schema).issues');
+    assert(issues.some((s) => /no title/i.test(s)), `expected a "no title" repair, got: ${issues.join(' | ')}`);
+    eq(q(w, 'normalizeSchema(schema).schema.steps[0].questions[0].title'), 'Untitled question',
+      'the published copy should carry a placeholder title');
+  });
+
+  await test('adding and removing options works, but the last one is protected', () => {
+    reset(w);
+    // question 0 of section 0 is a choice question in the default schema
+    const card = d.querySelector('#questionList .q-card[data-q="0"]');
+    assert(card.querySelector('[data-add-opt]'), 'expected a choice question first');
+    const before = w.eval('schema.steps[0].questions[0].options.length');
+    card.querySelector('[data-add-opt]').click();
+    eq(w.eval('schema.steps[0].questions[0].options.length'), before + 1, 'option not added');
+
+    // delete every option down to one
+    for (let i = 0; i < before; i++) {
+      d.querySelector('#questionList .q-card[data-q="0"] [data-del-opt]').click();
+    }
+    eq(w.eval('schema.steps[0].questions[0].options.length'), 1, 'should have stopped at one option');
+    w.__alerts.length = 0;
+    d.querySelector('#questionList .q-card[data-q="0"] [data-del-opt]').click();
+    eq(w.eval('schema.steps[0].questions[0].options.length'), 1, 'the last option was deleted');
+    assert(w.__alerts.length === 1, 'the editor should explain why it refused');
+  });
+
+  /* ---------------------------------------------------------- type switching */
+
+  group('Switching a question type');
+
+  await test('switching to a type with options seeds one', () => {
+    reset(w);
+    d.querySelector('#addQuestionBtn').click();
+    const last = w.eval('schema.steps[0].questions.length - 1');
+    const sel = d.querySelector(`#questionList .q-card[data-q="${last}"] .q-type`);
+    sel.value = 'dropdown';
+    ev(sel, 'change');
+    eq(w.eval(`schema.steps[0].questions[${last}].type`), 'dropdown', 'type not changed');
+    assert(w.eval(`schema.steps[0].questions[${last}].options.length >= 1`), 'no seed option');
+  });
+
+  await test('stale per-type settings do not survive a type change', () => {
+    reset(w);
+    d.querySelector('#addQuestionBtn').click();
+    const last = w.eval('schema.steps[0].questions.length - 1');
+    w.eval(`schema.steps[0].questions[${last}].type = 'paragraph';
+            schema.steps[0].questions[${last}].minWords = 500;
+            renderQuestions();`);
+    const sel = d.querySelector(`#questionList .q-card[data-q="${last}"] .q-type`);
+    sel.value = 'radio';
+    ev(sel, 'change');
+    assert(!w.eval(`'minWords' in schema.steps[0].questions[${last}]`),
+      'minWords should not survive onto a multiple-choice question');
+  });
+
+  await test('losing several options asks first, and declining reverts the dropdown', () => {
+    reset(w);
+    const card = () => d.querySelector('#questionList .q-card[data-q="0"]');
+    const originalType = w.eval('schema.steps[0].questions[0].type');
+    const originalOpts = w.eval('schema.steps[0].questions[0].options.length');
+    assert(originalOpts > 1, 'this test needs a question with several options');
+
+    w.__confirmWith = false;
+    w.__answers.length = 0;
+    const sel = card().querySelector('.q-type');
+    sel.value = 'short_text';
+    ev(sel, 'change');
+    assert(w.__answers.length === 1, 'the editor should have asked before discarding options');
+    eq(w.eval('schema.steps[0].questions[0].type'), originalType, 'declining should keep the type');
+    eq(w.eval('schema.steps[0].questions[0].options.length'), originalOpts, 'declining should keep the options');
+    eq(card().querySelector('.q-type').value, originalType, 'the dropdown should snap back');
+
+    w.__confirmWith = true;
+    const sel2 = card().querySelector('.q-type');
+    sel2.value = 'short_text';
+    ev(sel2, 'change');
+    eq(w.eval('schema.steps[0].questions[0].type'), 'short_text', 'accepting should change the type');
+  });
+
+  /* ---------------------------------------------------------- conditions */
+
+  group('Conditional questions');
+
+  await test('deleting a question clears conditions that depended on it', () => {
+    reset(w);
+    // the default schema conditions orgName on legalStatus
+    assert(w.eval("!!schema.steps.flatMap(s=>s.questions).find(x=>x.id==='orgName')?.showIf"),
+      'this test expects orgName to be conditional');
+    const section = w.eval("schema.steps.findIndex(s => s.questions.some(x => x.id === 'legalStatus'))");
+    const index = w.eval(`schema.steps[${section}].questions.findIndex(x => x.id === 'legalStatus')`);
+    w.eval(`activeSection = ${section}; renderAll();`);
+
+    w.__answers.length = 0;
+    d.querySelector(`#questionList .q-card[data-q="${index}"] [data-del-q]`).click();
+    assert(w.__answers.some((m) => /shown based on this one/i.test(m)),
+      `the warning should mention dependants; asked: ${JSON.stringify(w.__answers)}`);
+    assert(!w.eval("schema.steps.flatMap(s=>s.questions).some(x=>x.id==='legalStatus')"), 'question not deleted');
+    assert(!w.eval("schema.steps.flatMap(s=>s.questions).find(x=>x.id==='orgName').showIf"),
+      'the dangling condition should have been removed');
+  });
+
+  await test('deleting a whole section clears conditions on its questions', () => {
+    reset(w);
+    const section = w.eval("schema.steps.findIndex(s => s.questions.some(x => x.id === 'legalStatus'))");
+    d.querySelector(`#sectionList [data-del-section="${section}"]`).click();
+    assert(!w.eval("schema.steps.flatMap(s=>s.questions).some(x=>x.id==='legalStatus')"), 'section not deleted');
+    const org = q(w, "schema.steps.flatMap(s=>s.questions).find(x=>x.id==='orgName') || null");
+    if (org) assert(!org.showIf, 'orgName kept a condition pointing at a deleted question');
+  });
+
+  await test('renaming an option carries the condition with it', () => {
+    reset(w);
+    const section = w.eval("schema.steps.findIndex(s => s.questions.some(x => x.id === 'legalStatus'))");
+    const index = w.eval(`schema.steps[${section}].questions.findIndex(x => x.id === 'legalStatus')`);
+    w.eval(`activeSection = ${section}; renderAll();`);
+    const current = w.eval("schema.steps.flatMap(s=>s.questions).find(x=>x.id==='orgName').showIf.equals");
+    const optIndex = w.eval(`schema.steps[${section}].questions[${index}].options.findIndex(o => o.value === ${JSON.stringify(current)})`);
+    assert(optIndex >= 0, 'the condition should point at a real option');
+
+    const input = d.querySelector(`#questionList .q-card[data-q="${index}"] .opt-input[data-opt="${optIndex}"][data-k="label"]`);
+    input.value = 'Registered organization';
+    ev(input, 'input');
+
+    eq(w.eval("schema.steps.flatMap(s=>s.questions).find(x=>x.id==='orgName').showIf.equals"),
+      'Registered organization', 'the condition still points at the old option value');
+    eq(q(w, 'normalizeSchema(schema).issues'), [], 'renaming should leave the schema clean');
+  });
+
+  await test('turning the source question into a non-choice type clears its conditions', () => {
+    reset(w);
+    const section = w.eval("schema.steps.findIndex(s => s.questions.some(x => x.id === 'legalStatus'))");
+    const index = w.eval(`schema.steps[${section}].questions.findIndex(x => x.id === 'legalStatus')`);
+    w.eval(`activeSection = ${section}; renderAll();`);
+    const sel = d.querySelector(`#questionList .q-card[data-q="${index}"] .q-type`);
+    sel.value = 'paragraph';
+    ev(sel, 'change');
+    assert(!w.eval("schema.steps.flatMap(s=>s.questions).find(x=>x.id==='orgName').showIf"),
+      'a condition survived pointing at a question that no longer has options');
+  });
+
+  await test('the condition dropdown only offers questions that have options', () => {
+    reset(w);
+    d.querySelector('#questionList .q-card[data-q="0"] [data-toggle-settings]').click();
+    const sel = d.querySelector('#questionList .q-card[data-q="0"] [data-set="showIfQuestion"]');
+    assert(sel, 'no "show only if" control');
+    const offered = [...sel.options].map((o) => o.value).filter(Boolean);
+    const choiceIds = q(w, `schema.steps.flatMap(s=>s.questions)
+      .filter(x => ['radio','checkbox','dropdown','scale'].includes(x.type)).map(x => x.id)`);
+    offered.forEach((id) => assert(choiceIds.includes(id), `"${id}" has no options but is offered as a condition`));
+  });
+
+  await test('choosing a condition writes showIf, not stray keys', () => {
+    reset(w);
+    d.querySelector('#addQuestionBtn').click();
+    const last = w.eval('schema.steps[0].questions.length - 1');
+    d.querySelector(`#questionList .q-card[data-q="${last}"] [data-toggle-settings]`).click();
+    const sel = d.querySelector(`#questionList .q-card[data-q="${last}"] [data-set="showIfQuestion"]`);
+    const target = [...sel.options].map((o) => o.value).find(Boolean);
+    sel.value = target;
+    ev(sel, 'input'); // selects fire input as well as change — neither may leak
+    ev(sel, 'change');
+    const question = q(w, `schema.steps[0].questions[${last}]`);
+    assert(question.showIf && question.showIf.question === target, 'showIf was not set');
+    assert(!('showIfQuestion' in question), 'a stray showIfQuestion key was written into the schema');
+    assert(!('showIfEquals' in question), 'a stray showIfEquals key was written into the schema');
+    eq(q(w, 'normalizeSchema(schema).issues'), [], 'the resulting schema should be clean');
+  });
+
+  /* ---------------------------------------------------------- duplication */
+
+  group('Duplicating');
+
+  await test('duplicating a question gives the copy a fresh id', () => {
+    reset(w);
+    const before = q(w, 'schema.steps[0].questions.map(x => x.id)');
+    d.querySelector('#questionList .q-card[data-q="0"] [data-dup-q]').click();
+    const after = q(w, 'schema.steps[0].questions.map(x => x.id)');
+    eq(after.length, before.length + 1, 'no copy was made');
+    eq(new Set(after).size, after.length, `duplicate ids: ${after.join(', ')}`);
+  });
+
+  await test('duplicating twice in a row still yields unique ids', () => {
+    reset(w);
+    d.querySelector('#questionList .q-card[data-q="0"] [data-dup-q]').click();
+    d.querySelector('#questionList .q-card[data-q="0"] [data-dup-q]').click();
+    d.querySelector('#questionList .q-card[data-q="0"] [data-dup-q]').click();
+    const ids = q(w, 'schema.steps.flatMap(s => s.questions.map(x => x.id))');
+    eq(new Set(ids).size, ids.length, `duplicate ids: ${ids.join(', ')}`);
+  });
+
+  await test('duplicating a section re-points internal conditions at the copy', () => {
+    reset(w);
+    const section = w.eval("schema.steps.findIndex(s => s.questions.some(x => x.id === 'legalStatus'))");
+    // put the conditional question in the same section as its source
+    w.eval(`
+      const src = schema.steps.find(s => s.questions.some(x => x.id === 'legalStatus'));
+      const org = schema.steps.flatMap(s => s.questions).find(x => x.id === 'orgName');
+      const from = schema.steps.find(s => s.questions.includes(org));
+      from.questions.splice(from.questions.indexOf(org), 1);
+      src.questions.push(org);
+      renderAll();
+    `);
+    d.querySelector(`#sectionList [data-dup-section="${section}"]`).click();
+
+    const copy = q(w, `schema.steps[${section + 1}]`);
+    const conditional = copy.questions.find((x) => x.showIf);
+    assert(conditional, 'the copy lost its conditional question');
+    const idsInCopy = copy.questions.map((x) => x.id);
+    assert(idsInCopy.includes(conditional.showIf.question),
+      'the copy still points at the original question instead of its own copy');
+    eq(q(w, 'normalizeSchema(schema).issues'), [], 'duplicating should leave a clean schema');
+  });
+
+  /* ---------------------------------------------------------- persistence */
+
+  group('Saving, publishing and importing');
+
+  await test('edits are written to storage as you go, not only on publish', () => {
+    reset(w);
+    localStorage.removeItem(STORAGE_KEY);
+    d.querySelector('#addSectionBtn').click();
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+    assert(stored, 'adding a section did not persist');
+    eq(stored.steps.length, w.eval('schema.steps.length'), 'stored schema is out of step with the editor');
+  });
+
+  await test('Publish emits a file the form can execute and the editor can re-import', () => {
+    reset(w);
+    // capture the download instead of writing it to disk
+    let captured = null;
+    const realCreate = w.URL.createObjectURL;
+    const realClick = w.HTMLAnchorElement.prototype.click;
+    w.URL.createObjectURL = (blob) => { captured = blob; return 'blob:captured'; };
+    w.URL.revokeObjectURL = () => {};
+    w.HTMLAnchorElement.prototype.click = function () {};
+    try {
+      d.querySelector('#exportBtn').click();
+    } finally {
+      w.URL.createObjectURL = realCreate;
+      w.HTMLAnchorElement.prototype.click = realClick;
+    }
+    assert(captured, 'Publish produced no file');
+
+    return captured.text().then((text) => {
+      assert(/^\/\*/.test(text.trim()), 'the published file should start with an explanatory comment');
+      const win = {};
+      new Function('window', text)(win);           // must be executable JavaScript
+      assert(win.PUBLISHED_SCHEMA, 'no PUBLISHED_SCHEMA was assigned');
+      eq(normalizeSchema(win.PUBLISHED_SCHEMA).issues, [], 'the published schema needed repairs');
+      assert(!JSON.stringify(win.PUBLISHED_SCHEMA).includes('__open'), 'editor state leaked into the published file');
+
+      // and the editor's own importer must accept it back
+      d.querySelector('#importBtn').click();
+      d.querySelector('#importText').value = text;
+      d.querySelector('#doImport').click();
+      assert(d.querySelector('#importModal').hidden, 'the import dialog should close on success');
+      eq(w.eval('schema.steps.length'), win.PUBLISHED_SCHEMA.steps.length, 'round-trip changed the section count');
+    });
+  });
+
+  await test('importing malformed JSON is refused and leaves the editor intact', () => {
+    reset(w);
+    const before = w.eval('schema.steps.length');
+    d.querySelector('#importBtn').click();
+    d.querySelector('#importText').value = '{ not json at all';
+    d.querySelector('#doImport').click();
+    assert(!d.querySelector('#importError').hidden, 'no error was shown');
+    assert(!d.querySelector('#importModal').hidden, 'the dialog should stay open on failure');
+    eq(w.eval('schema.steps.length'), before, 'a failed import changed the schema');
+    d.querySelector('#closeImport').click();
+  });
+
+  await test('importing a structurally broken schema repairs it and says what it fixed', () => {
+    reset(w);
+    w.__alerts.length = 0;
+    d.querySelector('#importBtn').click();
+    d.querySelector('#importText').value = JSON.stringify({
+      steps: [{
+        title: 'Broken',
+        questions: [
+          { id: 'bad id"here', type: 'nonsense', title: '' },
+          { id: 'ghost', type: 'short_text', title: 'G', showIf: { question: 'nowhere', equals: 'x' } },
+        ],
+      }],
+    });
+    d.querySelector('#doImport').click();
+    assert(d.querySelector('#importModal').hidden, 'a repairable schema should import');
+    assert(w.__alerts.length === 1, 'the editor should report the repairs it made');
+    const ids = q(w, 'schema.steps.flatMap(s => s.questions.map(x => x.id))');
+    ids.forEach((id) => assert(/^[A-Za-z0-9_-]+$/.test(id), `unsafe id survived import: ${id}`));
+    assert(!w.eval("schema.steps[0].questions.find(x => x.title === 'G').showIf"),
+      'a dangling condition survived import');
+    eq(q(w, 'normalizeSchema(schema).issues'), [], 'the imported schema should now be clean');
+  });
+
+  await test('Reset discards local edits and restores the published form', () => {
+    reset(w);
+    const original = w.eval('schema.steps.length');
+    d.querySelector('#addSectionBtn').click();
+    assert(w.eval('schema.steps.length') === original + 1, 'setup failed');
+    d.querySelector('#resetBtn').click();
+    eq(w.eval('schema.steps.length'), original, 'reset did not restore the published schema');
+    assert(!localStorage.getItem(STORAGE_KEY), 'reset should clear the stored override');
+  });
+
+  /* ---------------------------------------------------------- preview */
+
+  group('Preview');
+
+  await test('preview renders the section with the same code the form uses', () => {
+    reset(w);
+    d.querySelector('#previewBtn').click();
+    const host = d.querySelector('#previewHost');
+    assert(!d.querySelector('#previewModal').hidden, 'preview did not open');
+    const count = w.eval('schema.steps[0].questions.length');
+    eq(host.querySelectorAll('[data-question]').length, count, 'preview question count');
+    d.querySelector('#closePreview').click();
+  });
+
+  await test('a hostile question title cannot inject markup into the preview', () => {
+    reset(w);
+    w.eval(`schema.steps[0].questions[0].title = '"><img src=x onerror=alert(1)>'; renderAll();`);
+    d.querySelector('#previewBtn').click();
+    const host = d.querySelector('#previewHost');
+    assert(!host.querySelector('img'), 'the title injected an element into the preview');
+    d.querySelector('#closePreview').click();
+  });
+
+  /* ---------------------------------------------------------- teardown */
+
+  } finally {
+    restoreStorage();
+  }
+
+  const summary = document.getElementById('summary');
+  summary.textContent = failed.length ? `${passed} passed, ${failed.length} failed` : `All ${passed} tests passed`;
+  summary.className = failed.length ? 'fail' : 'pass';
+  window.__testResults = { passed, failed: failed.length, failures: failed };
+  document.title = failed.length ? `FAIL (${failed.length})` : `PASS (${passed})`;
+})();
+</script>
+</body>
+</html>

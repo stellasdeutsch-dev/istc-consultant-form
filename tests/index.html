@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ISTC form — all browser tests</title>
+<style>
+  body { font: 15px/1.6 -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 32px;
+         background: #f6f8fb; color: #14202f; }
+  main { max-width: 620px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #6b7889; margin: 0 0 22px; }
+  #total { border: 1px solid #dde3ec; background: #fff; border-radius: 12px; padding: 16px 18px;
+           font-size: 17px; font-weight: 700; margin-bottom: 18px; }
+  #total.pass { border-color: #1f8a4c; color: #1f8a4c; }
+  #total.fail { border-color: #c0392b; color: #c0392b; }
+  .suite { display: flex; align-items: baseline; gap: 10px; background: #fff; border: 1px solid #e6eaf1;
+           border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; }
+  .suite a { font-weight: 600; color: #204068; text-decoration: none; }
+  .suite a:hover { text-decoration: underline; }
+  .score { margin-left: auto; font-variant-numeric: tabular-nums; color: #6b7889; }
+  .score.ok { color: #1f8a4c; font-weight: 700; }
+  .score.no { color: #c0392b; font-weight: 700; }
+  .fails { font: 12px/1.5 ui-monospace, Menlo, monospace; color: #c0392b; white-space: pre-wrap;
+           margin: 0 0 10px 16px; }
+  .note { color: #6b7889; font-size: 13px; margin-top: 22px; }
+  code { background: #eef1f6; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  iframe { position: absolute; left: -10000px; top: 0; width: 1400px; height: 1000px; border: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ISTC Expression of Interest — browser tests</h1>
+  <p class="sub">Runs both browser suites in order and adds up the result.</p>
+  <div id="total">Running…</div>
+  <div id="suites"></div>
+  <p class="note">
+    The pure-logic suite runs outside the browser — schema repair, id generation,
+    the xlsx writer and the printable document:<br />
+    <code>node tests/node-tests.mjs</code>
+  </p>
+</main>
+
+<iframe id="runner"></iframe>
+
+<script>
+'use strict';
+
+/* Each suite is its own page so it can be opened and debugged on its own.
+   This hub just loads them in turn and reads the result each one publishes.
+   They run sequentially on purpose: both use the same localStorage keys. */
+const SUITES = [
+  { file: 'tests.html', label: 'Form — adapters, validation, live application' },
+  { file: 'admin-tests.html', label: 'Editor — questions, types, conditions, publishing' },
+];
+
+const runner = document.getElementById('runner');
+const list = document.getElementById('suites');
+const total = document.getElementById('total');
+
+function row(suite) {
+  const el = document.createElement('div');
+  el.className = 'suite';
+  el.innerHTML = `<a href="${suite.file}" target="_blank">${suite.label}</a>`
+    + `<span class="score">running…</span>`;
+  list.appendChild(el);
+  return el.querySelector('.score');
+}
+
+function runSuite(suite) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const poll = setInterval(() => {
+      let result = null;
+      try { result = runner.contentWindow.__testResults; } catch (_) { /* still navigating */ }
+      if (result) { clearInterval(poll); resolve(result); }
+      else if (Date.now() - started > 60000) {
+        clearInterval(poll);
+        resolve({ passed: 0, failed: 1, failures: [{ name: suite.file, error: 'timed out after 60s' }] });
+      }
+    }, 200);
+    runner.src = `${suite.file}?hub=${Date.now()}`;
+  });
+}
+
+(async function main() {
+  let passed = 0;
+  let failed = 0;
+
+  for (const suite of SUITES) {
+    const score = row(suite);
+    const result = await runSuite(suite);
+    passed += result.passed;
+    failed += result.failed;
+    score.textContent = result.failed ? `${result.passed} passed, ${result.failed} failed` : `${result.passed} passed`;
+    score.className = `score ${result.failed ? 'no' : 'ok'}`;
+    (result.failures || []).forEach((f) => {
+      const p = document.createElement('p');
+      p.className = 'fails';
+      p.textContent = `✗ ${f.name}\n  ${f.error || f.err || ''}`;
+      list.appendChild(p);
+    });
+  }
+
+  total.textContent = failed ? `${passed} passed, ${failed} failed` : `All ${passed} browser tests passed`;
+  total.className = failed ? 'fail' : 'pass';
+  document.title = failed ? `FAIL (${failed})` : `PASS (${passed})`;
+  window.__testResults = { passed, failed };
+})();
+</script>
+</body>
+</html>

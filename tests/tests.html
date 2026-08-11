@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ISTC form — browser tests</title>
+<style>
+  body { font: 14px/1.55 -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 24px;
+         background: #f6f8fb; color: #14202f; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #6b7889; margin: 0 0 18px; }
+  #summary { position: sticky; top: 0; background: #fff; border: 1px solid #dde3ec; border-radius: 10px;
+             padding: 12px 14px; font-weight: 700; margin-bottom: 14px; z-index: 5; }
+  #summary.pass { border-color: #1f8a4c; color: #1f8a4c; }
+  #summary.fail { border-color: #c0392b; color: #c0392b; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: #6b7889;
+       margin: 18px 0 6px; }
+  .t { padding: 3px 0 3px 22px; position: relative; }
+  .t.ok::before { content: "✓"; color: #1f8a4c; position: absolute; left: 2px; }
+  .t.no::before { content: "✗"; color: #c0392b; position: absolute; left: 2px; }
+  .t.no { color: #c0392b; }
+  .why { color: #c0392b; font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap;
+         margin: 2px 0 6px 0; }
+  /* The sandbox must be in the layout tree: adapters use getElementById and
+     autoGrow() bails on elements with no offsetParent. Keep it rendered but
+     out of sight rather than display:none. */
+  #sandbox { position: absolute; left: -10000px; top: 0; width: 900px; }
+  iframe { position: absolute; left: -10000px; top: 0; width: 1200px; height: 900px; border: 0; }
+</style>
+</head>
+<body>
+
+<h1>ISTC Expression of Interest — browser tests</h1>
+<p class="sub">Exercises the real render.js adapters and the live form in an iframe. No build step, no libraries.</p>
+<div id="summary">Running…</div>
+<div id="out"></div>
+
+<div id="sandbox"></div>
+<iframe id="app"></iframe>
+
+<script src="../icons.js"></script>
+<script src="../data.js"></script>
+<script src="../schema.js"></script>
+<script src="../render.js"></script>
+<script src="../export.js"></script>
+
+<script>
+'use strict';
+
+/* ------------------------------------------------------------ harness */
+
+let passed = 0;
+const failed = [];
+const out = document.getElementById('out');
+
+function group(name) {
+  const h = document.createElement('h2');
+  h.textContent = name;
+  out.appendChild(h);
+}
+
+function test(name, fn) {
+  const row = document.createElement('div');
+  row.className = 't';
+  row.textContent = name;
+  out.appendChild(row);
+  try {
+    fn();
+    row.classList.add('ok');
+    passed += 1;
+  } catch (err) {
+    row.classList.add('no');
+    const why = document.createElement('div');
+    why.className = 'why';
+    why.textContent = err && err.stack ? err.stack.split('\n').slice(0, 3).join('\n') : String(err);
+    out.appendChild(why);
+    failed.push({ name, err });
+  }
+}
+
+async function testAsync(name, fn) {
+  const row = document.createElement('div');
+  row.className = 't';
+  row.textContent = name;
+  out.appendChild(row);
+  try {
+    await fn();
+    row.classList.add('ok');
+    passed += 1;
+  } catch (err) {
+    row.classList.add('no');
+    const why = document.createElement('div');
+    why.className = 'why';
+    why.textContent = err && err.stack ? err.stack.split('\n').slice(0, 3).join('\n') : String(err);
+    out.appendChild(why);
+    failed.push({ name, err });
+  }
+}
+
+function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed'); }
+function eq(actual, expected, msg) {
+  const a = JSON.stringify(actual);
+  const b = JSON.stringify(expected);
+  if (a !== b) throw new Error(`${msg || 'not equal'}\n  actual:   ${a}\n  expected: ${b}`);
+}
+
+const sandbox = document.getElementById('sandbox');
+
+/* Render one question into the sandbox and hand back its adapter. */
+function mount(q) {
+  sandbox.innerHTML = renderQuestion(q);
+  const adapter = ADAPTERS[q.type] || ADAPTERS.short_text;
+  if (adapter.init) adapter.init(q);
+  return adapter;
+}
+
+/* ============================================================
+   1. Adapter round-trips: whatever get() returns, set() must restore.
+   This is what a saved draft depends on.
+   ============================================================ */
+
+group('Adapter round-trip — set(get()) restores the answer');
+
+const ROUND_TRIP = [
+  { q: { id: 'rt_text', type: 'short_text', title: 'Name' }, value: 'Тимур Ережепов' },
+  { q: { id: 'rt_mail', type: 'email', title: 'Email' }, value: 'a.b+tag@example.co.uk' },
+  { q: { id: 'rt_tel', type: 'phone', title: 'Phone' }, value: '+7 700 123 4567' },
+  { q: { id: 'rt_para', type: 'paragraph', title: 'Summary' }, value: 'line one\nline two' },
+  { q: { id: 'rt_num', type: 'number', title: 'Rate' }, value: '450' },
+  { q: { id: 'rt_month', type: 'date_month', title: 'From' }, value: '2024-06' },
+  { q: {
+      id: 'rt_radio', type: 'radio', title: 'Role',
+      options: [{ value: 'A', label: 'A' }, { value: 'B', label: 'B' }],
+    }, value: 'B' },
+  { q: {
+      id: 'rt_check', type: 'checkbox', title: 'Areas',
+      options: [{ value: 'X', label: 'X' }, { value: 'Y', label: 'Y' }, { value: 'Z', label: 'Z' }],
+    }, value: ['X', 'Z'] },
+  { q: {
+      id: 'rt_drop', type: 'dropdown', title: 'Country',
+      options: [{ value: 'KZ', label: 'Kazakhstan' }, { value: 'GE', label: 'Georgia' }],
+    }, value: 'GE' },
+  { q: {
+      id: 'rt_scale', type: 'scale', title: 'Experience',
+      options: [{ value: '3-5', label: '3–5' }, { value: '5-10', label: '5–10' }],
+    }, value: '5-10' },
+  { q: { id: 'rt_stmt', type: 'statement', title: 'Consent', body: 'text', consentLabel: 'I agree' }, value: 'I agree' },
+  { q: { id: 'rt_rate', type: 'rate_pair', title: 'Rates' }, value: { daily: '400', hourly: '50' } },
+];
+
+ROUND_TRIP.forEach(({ q, value }) => {
+  test(`${q.type}: ${JSON.stringify(value).slice(0, 40)}`, () => {
+    const a = mount(q);
+    a.set(q, value);
+    eq(a.get(q), value, `${q.type} did not round-trip`);
+  });
+});
+
+test('empty round-trip: set(get()) on an untouched question is stable', () => {
+  ROUND_TRIP.forEach(({ q }) => {
+    const a = mount(q);
+    const empty = a.get(q);
+    a.set(q, empty);
+    eq(a.get(q), empty, `${q.type} lost its empty state`);
+  });
+});
+
+group('Adapter round-trip — “Other (specify)” answers');
+
+const OTHER_RADIO = {
+  id: 'o_radio', type: 'radio', title: 'Role', allowOther: true,
+  options: [{ value: 'A', label: 'A' }],
+};
+const OTHER_CHECK = {
+  id: 'o_check', type: 'checkbox', title: 'Areas', allowOther: true,
+  options: [{ value: 'X', label: 'X' }],
+};
+
+test('radio: a custom “Other” answer survives a draft round-trip', () => {
+  let a = mount(OTHER_RADIO);
+  document.querySelector('input[name="o_radio"][value="Other (specify)"]').checked = true;
+  document.getElementById('o_radio__other').value = 'Maritime security';
+  const saved = a.get(OTHER_RADIO);
+  eq(saved, 'Maritime security', 'get() should resolve to the typed text');
+
+  a = mount(OTHER_RADIO); // fresh render, as after a reload
+  a.set(OTHER_RADIO, saved);
+  eq(a.get(OTHER_RADIO), 'Maritime security', 'custom answer lost on restore');
+  assert(document.querySelector('input[name="o_radio"][value="Other (specify)"]').checked,
+    'the Other radio should be re-checked');
+  assert(!document.querySelector('[data-other-for="o_radio"]').hidden, 'the Other box should be visible');
+});
+
+test('checkbox: a custom “Other” answer survives alongside normal ones', () => {
+  let a = mount(OTHER_CHECK);
+  document.querySelector('input[name="o_check"][value="X"]').checked = true;
+  document.querySelector('input[name="o_check"][value="Other (specify)"]').checked = true;
+  document.getElementById('o_check__other').value = 'Arctic policy';
+  const saved = a.get(OTHER_CHECK);
+  eq(saved, ['X', 'Arctic policy'], 'get() should resolve Other to the typed text');
+
+  a = mount(OTHER_CHECK);
+  a.set(OTHER_CHECK, saved);
+  eq(a.get(OTHER_CHECK), ['X', 'Arctic policy'], 'custom answer lost on restore');
+});
+
+/* ============================================================
+   2. Validation
+   ============================================================ */
+
+group('Validation');
+
+test('required short_text rejects empty, accepts text', () => {
+  const q = { id: 'v_req', type: 'short_text', title: 'Full Name', required: true };
+  const a = mount(q);
+  assert(a.validate(q), 'empty required field should fail');
+  a.set(q, 'Aisha');
+  assert(!a.validate(q), 'filled required field should pass');
+});
+
+test('optional short_text accepts empty', () => {
+  const q = { id: 'v_opt', type: 'short_text', title: 'Middle name', required: false };
+  const a = mount(q);
+  assert(!a.validate(q), 'empty optional field should pass');
+});
+
+test('a question with no title still produces a usable message', () => {
+  const q = { id: 'v_untitled', type: 'short_text', required: true };
+  const a = mount(q);
+  const msg = a.validate(q); // must not throw on q.title.toLowerCase()
+  assert(typeof msg === 'string' && msg.length, 'expected a message, got ' + msg);
+});
+
+test('email rejects malformed addresses', () => {
+  const q = { id: 'v_mail', type: 'email', title: 'Email', required: true };
+  const a = mount(q);
+  ['plain', 'a@b', 'a b@c.com', '@example.com', 'a@.com'].forEach((bad) => {
+    a.set(q, bad);
+    assert(a.validate(q), `"${bad}" should be rejected`);
+  });
+  ['a@b.co', 'first.last+tag@sub.example.org'].forEach((good) => {
+    a.set(q, good);
+    assert(!a.validate(q), `"${good}" should be accepted`);
+  });
+});
+
+test('phone rejects letters and out-of-range digit counts', () => {
+  const q = { id: 'v_tel', type: 'phone', title: 'Phone', required: true };
+  const a = mount(q);
+  ['abcd', '12345', '1234567890123456789'].forEach((bad) => {
+    a.set(q, bad);
+    assert(a.validate(q), `"${bad}" should be rejected`);
+  });
+  ['+7 700 123 4567', '(020) 7946 0958'].forEach((good) => {
+    a.set(q, good);
+    assert(!a.validate(q), `"${good}" should be accepted`);
+  });
+});
+
+test('phone input strips letters as you type', () => {
+  const q = { id: 'v_tel2', type: 'phone', title: 'Phone' };
+  mount(q);
+  const el = document.getElementById('v_tel2');
+  el.value = '+7abc700';
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  eq(el.value, '+7700', 'letters should be removed');
+});
+
+test('paragraph enforces minWords and the counter tracks it', () => {
+  const q = { id: 'v_para', type: 'paragraph', title: 'Summary', required: true, minWords: 5 };
+  const a = mount(q);
+  a.set(q, 'one two three');
+  document.getElementById('v_para').dispatchEvent(new Event('input', { bubbles: true }));
+  assert(a.validate(q), 'under the minimum should fail');
+  eq(document.querySelector('[data-counter-for="v_para"]').textContent, '3 / 5 words');
+  a.set(q, 'one two three four five');
+  document.getElementById('v_para').dispatchEvent(new Event('input', { bubbles: true }));
+  assert(!a.validate(q), 'at the minimum should pass');
+  assert(document.querySelector('[data-counter-for="v_para"]').classList.contains('ok'), 'counter should read as met');
+});
+
+test('“Other” chosen but left blank is rejected', () => {
+  const a = mount(OTHER_RADIO);
+  document.querySelector('input[name="o_radio"][value="Other (specify)"]').checked = true;
+  assert(a.validate({ ...OTHER_RADIO, required: true }), 'blank Other should fail');
+});
+
+test('required rate_pair demands both halves; optional one may be skipped entirely', () => {
+  const req = { id: 'v_rate', type: 'rate_pair', title: 'Rates', required: true };
+  let a = mount(req);
+  assert(a.validate(req), 'empty required pair should fail');
+  a.set(req, { daily: '400', hourly: '' });
+  assert(a.validate(req), 'half-filled pair should fail');
+  a.set(req, { daily: '400', hourly: '50' });
+  assert(!a.validate(req), 'full pair should pass');
+
+  const opt = { id: 'v_rate2', type: 'rate_pair', title: 'Rates', required: false };
+  a = mount(opt);
+  assert(!a.validate(opt), 'untouched optional pair should pass');
+  a.set(opt, { daily: '400', hourly: '' });
+  assert(a.validate(opt), 'half-filled optional pair should still fail');
+});
+
+test('number honours min and max', () => {
+  const q = { id: 'v_num', type: 'number', title: 'Years', required: true, min: 3, max: 40 };
+  const a = mount(q);
+  a.set(q, '2'); assert(a.validate(q), 'below min should fail');
+  a.set(q, '41'); assert(a.validate(q), 'above max should fail');
+  a.set(q, '3'); assert(!a.validate(q), 'at min should pass');
+  a.set(q, '40'); assert(!a.validate(q), 'at max should pass');
+  eq(document.getElementById('v_num').getAttribute('max'), '40', 'max should reach the DOM');
+});
+
+test('statement must be ticked when required', () => {
+  const q = { id: 'v_stmt', type: 'statement', title: 'Consent', body: 'b', consentLabel: 'I agree', required: true };
+  const a = mount(q);
+  assert(a.validate(q), 'unticked consent should fail');
+  a.set(q, 'I agree');
+  assert(!a.validate(q), 'ticked consent should pass');
+});
+
+/* ============================================================
+   3. Escaping — schema text and answers must never become markup
+   ============================================================ */
+
+group('Escaping');
+
+const XSS = '"><img src=x onerror=alert(1)>';
+
+test('a malicious question title cannot inject an element', () => {
+  const q = { id: 'x_title', type: 'short_text', title: XSS };
+  mount(q);
+  assert(!sandbox.querySelector('img'), 'title injected an element');
+  assert(sandbox.textContent.includes(XSS), 'title should still be shown as text');
+});
+
+test('malicious option labels, help text and placeholders are inert', () => {
+  const q = {
+    id: 'x_opt', type: 'radio', title: 'T', help: XSS, placeholder: XSS,
+    options: [{ value: XSS, label: XSS, desc: XSS }],
+  };
+  mount(q);
+  assert(!sandbox.querySelector('img'), 'option injected an element');
+});
+
+test('a malicious statement body is inert', () => {
+  mount({ id: 'x_body', type: 'statement', title: 'T', body: XSS, consentLabel: XSS });
+  assert(!sandbox.querySelector('img'), 'statement body injected an element');
+});
+
+test('an option value with quotes still round-trips through the value selectors', () => {
+  const tricky = 'He said "hi" & left';
+  const q = { id: 'x_val', type: 'radio', title: 'T', options: [{ value: tricky, label: tricky }] };
+  const a = mount(q);
+  a.set(q, tricky);
+  eq(a.get(q), tricky, 'quoted option value did not round-trip');
+});
+
+/* ============================================================
+   4. Structure
+   ============================================================ */
+
+group('Structure');
+
+test('renderForm produces one section per step plus a review step', () => {
+  const host = document.createElement('form');
+  sandbox.innerHTML = '';
+  sandbox.appendChild(host);
+  const s = normalizeSchema(DEFAULT_SCHEMA).schema;
+  renderForm(s, host);
+  eq(host.querySelectorAll('.step').length, s.steps.length + 1, 'wrong number of steps');
+  assert(host.querySelector('#reviewContent'), 'no review container');
+  assert(host.querySelector('#stepNav'), 'no step navigation');
+});
+
+test('every question type in the default schema renders without throwing', () => {
+  const s = normalizeSchema(DEFAULT_SCHEMA).schema;
+  s.steps.flatMap((x) => x.questions).forEach((q) => {
+    const html = renderQuestion(q);
+    assert(html.includes(`data-question="${q.id}"`), `${q.id} lost its wrapper`);
+  });
+});
+
+test('required questions are marked, optional ones say so', () => {
+  sandbox.innerHTML = renderQuestion({ id: 'm_req', type: 'short_text', title: 'A', required: true })
+    + renderQuestion({ id: 'm_opt', type: 'short_text', title: 'B', required: false });
+  assert(sandbox.querySelector('[data-question="m_req"] .req'), 'required marker missing');
+  assert(sandbox.querySelector('[data-question="m_opt"] .optional'), 'optional marker missing');
+});
+
+/* ============================================================
+   5. Integration — the live form in an iframe
+   ============================================================ */
+
+const frame = document.getElementById('app');
+
+/* index.html pins its scripts with a fixed ?v= token, so the browser can
+   serve the iframe a cached copy of code that has since changed on disk —
+   which makes a stale pass look like a real one. Re-fetch each asset with
+   cache:'reload' first so the iframe is guaranteed to run current code. */
+const ASSETS = ['form-schema.js', 'schema.js', 'data.js', 'map-data.js', 'map.js',
+  'icons.js', 'render.js', 'export.js', 'app.js', 'landing.js', 'styles.css'];
+
+async function primeCache() {
+  await Promise.all(ASSETS.map((f) => fetch(`../${f}?v=2026-08-11a`, { cache: 'reload' })));
+}
+
+/* These tests assert against the published form, so they must not inherit a
+   schema override or a draft left behind by the editor tests or by a human
+   who used this browser. Both live on this origin, so clear them here. */
+const SCHEMA_KEY = 'istc-form-schema-v1';
+const DRAFT_KEY = 'istc-eoi-answers-v1';
+const saved = { schema: localStorage.getItem(SCHEMA_KEY), draft: localStorage.getItem(DRAFT_KEY) };
+
+function restoreStorage() {
+  localStorage.removeItem(DRAFT_KEY);
+  localStorage.removeItem(SCHEMA_KEY);
+  // Only hand back an override that still describes a usable form
+  if (saved.schema) {
+    try {
+      const parsed = JSON.parse(saved.schema);
+      if (normalizeSchema(parsed).issues.length === 0) localStorage.setItem(SCHEMA_KEY, saved.schema);
+    } catch (_) { /* drop it */ }
+  }
+}
+
+async function ready() {
+  localStorage.removeItem(SCHEMA_KEY);
+  localStorage.removeItem(DRAFT_KEY);
+  await primeCache();
+  return new Promise((resolve) => {
+    frame.addEventListener('load', () => setTimeout(resolve, 400), { once: true });
+    frame.src = `../index.html?test=${Date.now()}`;
+  });
+}
+
+(async function integration() {
+  try {
+  await ready();
+  const w = frame.contentWindow;
+  const d = frame.contentDocument;
+  const run = (code) => w.eval(code);
+
+  group('Integration — live form');
+
+  await testAsync('the iframe is running the published schema, not a leftover override', () => {
+    assert(!localStorage.getItem(SCHEMA_KEY), 'a schema override is still in storage');
+    assert(run("!!questionById.get('legalStatus')"), 'the default schema is not the one loaded');
+  });
+
+  await testAsync('the form boots and renders every schema step', () => {
+    const steps = run('schema.steps.length');
+    assert(steps >= 1, 'no steps');
+    eq(d.querySelectorAll('#eoiForm .step').length, steps + 1, 'rendered step count');
+    eq(d.querySelectorAll('.step-dot').length, steps + 1, 'stepper dot count');
+  });
+
+  await testAsync('the landing counts match the schema, not hardcoded numbers', () => {
+    const steps = run('schema.steps.length + 1');
+    eq(d.querySelector('[data-schema-stat="steps"]').textContent, String(steps), 'step count on the landing');
+    const expertise = run("schema.steps.flatMap(s=>s.questions).find(q=>q.id==='expertise').options.length");
+    eq(d.querySelector('[data-schema-stat="expertise-options"]').textContent, String(expertise), 'expertise count');
+  });
+
+  await testAsync('conditional questions start hidden and appear on the matching answer', () => {
+    run("ADAPTERS.radio.set(questionById.get('legalStatus'), 'Individual Consultant'); syncConditionals();");
+    assert(d.querySelector('[data-question="orgName"]').hidden, 'orgName should be hidden for an individual');
+    run("ADAPTERS.radio.set(questionById.get('legalStatus'), 'Consulting Firm / Organization'); syncConditionals();");
+    assert(!d.querySelector('[data-question="orgName"]').hidden, 'orgName should appear for a firm');
+  });
+
+  await testAsync('a hidden required question is not allowed to block its step', () => {
+    run("ADAPTERS.radio.set(questionById.get('legalStatus'), 'Individual Consultant'); syncConditionals();");
+    // orgName is required but hidden — with the rest of step 2 filled, the step must pass
+    run(`
+      ADAPTERS.short_text.set(questionById.get('fullName'), 'Aisha Nurpeisova');
+      ADAPTERS.short_text.set(questionById.get('nationality'), 'Kazakhstani');
+      ADAPTERS.short_text.set(questionById.get('countryResidence'), 'Kazakhstan');
+      ADAPTERS.email.set(questionById.get('email'), 'aisha@example.org');
+      ADAPTERS.phone.set(questionById.get('phone'), '+7 700 123 4567');
+      syncConditionals();
+    `);
+    assert(run('validateStep(2, {silent:true})'), 'step 2 should pass with orgName hidden');
+  });
+
+  await testAsync('a required question revealed by a condition does block its step', () => {
+    run("ADAPTERS.radio.set(questionById.get('legalStatus'), 'Consulting Firm / Organization'); syncConditionals();");
+    assert(!run('validateStep(2, {silent:true})'), 'step 2 should fail while orgName is empty and visible');
+    run("ADAPTERS.short_text.set(questionById.get('orgName'), 'Nova Institute');");
+    assert(run('validateStep(2, {silent:true})'), 'step 2 should pass once orgName is filled');
+  });
+
+  await testAsync('the country map widget selects, counts and clears', () => {
+    run("__countryPickers.geography.setSelection(['KAZ','UKR','GEO']); __countryPickers.geography.refreshUi();");
+    eq(run('__countryPickers.geography.size()'), 3, 'picker size');
+    eq(d.querySelectorAll('[data-chips-for="geography"] .country-chip').length, 3, 'chips shown');
+    assert(/3 countries/.test(d.querySelector('[data-count-for="geography"]').textContent), 'counter text');
+    assert(!d.querySelector('[data-clear-for="geography"]').hidden, 'Clear all should be visible');
+    run("__countryPickers.geography.clear();");
+    eq(run('__countryPickers.geography.size()'), 0, 'clear did not empty the picker');
+  });
+
+  await testAsync('the languages widget adds, dedupes and removes', () => {
+    run("__setLanguages('languages', [{name:'English',level:'Fluent'},{name:'Russian',level:'Native'}]);");
+    eq(run('__languageSets.languages.length'), 2, 'two languages expected');
+    eq(d.querySelectorAll('[data-lang-chips="languages"] .chip').length, 2, 'two chips expected');
+    run("__setLanguages('languages', [{name:'English',level:'Fluent'}]);");
+    eq(run('__languageSets.languages.length'), 1, 'set should replace, not append');
+  });
+
+  await testAsync('the assignments widget respects maxItems', () => {
+    const max = run("questionById.get('assignments').maxItems");
+    run(`__setAssignments('assignments', Array.from({length: ${max}}, (_, i) => ({title:'T'+i, description:'D'+i})));`);
+    eq(run('__assignmentSets.assignments.length'), max, 'expected maxItems entries');
+    assert(d.querySelector('[data-add-assignment="assignments"]').hidden, 'Add button should hide at the maximum');
+  });
+
+  await testAsync('a full draft survives save and restore across a reload', async () => {
+    // Fill every step of the live form
+    run(`
+      ADAPTERS.radio.set(questionById.get('role'), 'Consultant (Technical / Advisory Assignments)');
+      ADAPTERS.radio.set(questionById.get('legalStatus'), 'Individual Consultant');
+      ADAPTERS.short_text.set(questionById.get('fullName'), 'Aisha Nurpeisova');
+      ADAPTERS.short_text.set(questionById.get('nationality'), 'Kazakhstani');
+      ADAPTERS.short_text.set(questionById.get('countryResidence'), 'Kazakhstan');
+      ADAPTERS.email.set(questionById.get('email'), 'aisha@example.org');
+      ADAPTERS.phone.set(questionById.get('phone'), '+7 700 123 4567');
+      ADAPTERS.checkbox.set(questionById.get('expertise'), ['Cybersecurity']);
+      ADAPTERS.scale.set(questionById.get('experience'), '10-15 years');
+      __countryPickers.geography.setSelection(['KAZ','UKR']); __countryPickers.geography.refreshUi();
+      __setLanguages('languages', [{name:'Russian',level:'Native'}]);
+      ADAPTERS.paragraph.set(questionById.get('summary'), Array(520).fill('word').join(' '));
+      __setAssignments('assignments', [{title:'Grid hardening', client:'IAEA', country:'Kazakhstan',
+        from:'2022-01', to:'2023-06', role:'Lead', description:'Delivered the assessment.'}]);
+      ADAPTERS.checkbox.set(questionById.get('availability'), ['Remote only']);
+      ADAPTERS.rate_pair.set(questionById.get('rates'), {daily:'800', hourly:'100'});
+      ADAPTERS.radio.set(questionById.get('previousWork'), 'No');
+      ADAPTERS.statement.set(questionById.get('conflictAgree'), 'I agree');
+      ADAPTERS.statement.set(questionById.get('dataAgree'), 'I acknowledge and agree');
+      syncConditionals();
+      localStorage.setItem('istc-eoi-answers-v1', JSON.stringify(collectAnswers()));
+    `);
+    const before = JSON.parse(run('JSON.stringify(collectAnswers())'));
+
+    await new Promise((resolve) => {
+      frame.addEventListener('load', () => setTimeout(resolve, 400), { once: true });
+      frame.contentWindow.location.reload();
+    });
+    const w2 = frame.contentWindow;
+    const after = JSON.parse(w2.eval('JSON.stringify(collectAnswers())'));
+    eq(after, before, 'the restored draft differs from what was saved');
+
+    // and the restored country widget must not be a painted map with an empty UI
+    eq(w2.eval('document.querySelectorAll(\'[data-chips-for="geography"] .country-chip\').length'), 2,
+      'country chips did not come back');
+  });
+
+  await testAsync('every step reads complete once the draft is restored', () => {
+    const w2 = frame.contentWindow;
+    // the CV file cannot survive a reload, so attach a stand-in
+    w2.eval("__formFiles.cv = new File(['x'], 'cv.pdf', {type:'application/pdf'}); updateStepper();");
+    const incomplete = JSON.parse(w2.eval('JSON.stringify(incompleteSteps())'));
+    eq(incomplete, [], 'these steps still read as incomplete');
+  });
+
+  await testAsync('exports carry the full answers, not the review summaries', () => {
+    const w2 = frame.contentWindow;
+    const rows = JSON.parse(w2.eval('JSON.stringify(buildWorkbookRows())'));
+    const find = (needle) => rows.find((r) => String(r[1]).includes(needle));
+
+    const summary = find('Summary of Expertise');
+    assert(summary, 'no summary row in the workbook');
+    assert(!/^\d+ words$/.test(summary[2]), `workbook holds a word count, not the answer: "${summary[2]}"`);
+    assert(summary[2].split(/\s+/).length >= 500, 'the full 500+ word answer should be exported');
+
+    const assignments = find('Key Assignments');
+    assert(assignments, 'no assignments row');
+    assert(assignments[2].includes('Delivered the assessment.'), 'the assignment description was dropped');
+    assert(assignments[2].includes('IAEA'), 'the client was dropped');
+    assert(assignments[2].includes('Lead'), 'the role was dropped');
+
+    const geography = find('Geographic Experience');
+    assert(geography && !/^\d+ selected/.test(geography[2]), 'geography exported as a count');
+  });
+
+  await testAsync('the generated workbook is a valid, non-empty xlsx', () => {
+    const w2 = frame.contentWindow;
+    const len = w2.eval('buildXlsx(buildWorkbookRows(), "Application").length');
+    assert(len > 1500, `workbook suspiciously small: ${len} bytes`);
+    const sig = JSON.parse(w2.eval('JSON.stringify(Array.from(buildXlsx(buildWorkbookRows()).slice(0,4)))'));
+    eq(sig, [0x50, 0x4b, 0x03, 0x04], 'not a ZIP archive');
+  });
+
+  await testAsync('the printable copy contains the answers and escapes them', () => {
+    const html = frame.contentWindow.eval('buildPrintableHtml()');
+    assert(html.includes('Aisha Nurpeisova'), 'the name is missing from the printable copy');
+    assert(html.includes('Delivered the assessment.'), 'the assignment text is missing');
+    assert(!/<script>/i.test(html), 'unexpected script tag in the printable copy');
+  });
+
+  await testAsync('the review page lists every section and no empty ones', () => {
+    const w2 = frame.contentWindow;
+    w2.eval('goToStep(REVIEW_STEP)');
+    const d2 = frame.contentDocument;
+    const groups = d2.querySelectorAll('#reviewContent .review-group');
+    const withRows = [...groups].filter((g) => g.querySelectorAll('.review-row').length);
+    eq(groups.length, withRows.length, 'a review group rendered with no rows');
+    assert(!d2.querySelector('#reviewContent .review-warn'), 'a completed application should show no warning');
+  });
+
+  await testAsync('submitting without a configured endpoint fails safely and says so', async () => {
+    const w2 = frame.contentWindow;
+    const d2 = frame.contentDocument;
+    eq(w2.eval('CONFIG.SUBMIT_URL'), '', 'this test assumes no endpoint is configured');
+    w2.eval('nextBtn.click()');
+    await new Promise((r) => setTimeout(r, 250));
+    const err = d2.querySelector('#submitError');
+    assert(!err.hidden && /not open yet/i.test(err.textContent), 'expected a clear "not open yet" message');
+    assert(w2.eval("!!localStorage.getItem('istc-eoi-answers-v1')"), 'the draft must survive a failed submit');
+  });
+
+  await testAsync('an incomplete application is sent back to the first unfinished step', async () => {
+    const w2 = frame.contentWindow;
+    w2.eval("ADAPTERS.checkbox.set(questionById.get('availability'), []); " +
+      "document.querySelectorAll('input[name=\"availability\"]').forEach(i => i.checked = false);");
+    w2.eval('goToStep(REVIEW_STEP)');
+    const warn = frame.contentDocument.querySelector('#reviewContent .review-warn');
+    assert(warn, 'review should warn about the unanswered step');
+    w2.eval('nextBtn.click()');
+    await new Promise((r) => setTimeout(r, 250));
+    const availabilityStep = w2.eval("schema.steps.findIndex(s => s.questions.some(q => q.id === 'availability')) + 1");
+    eq(w2.eval('state.step'), availabilityStep, 'should have jumped to the unfinished step');
+  });
+
+  } finally {
+    // Leave no draft or override behind, even if a test threw
+    restoreStorage();
+  }
+
+  /* ---------------------------------------------------------- done */
+  const summary = document.getElementById('summary');
+  summary.textContent = failed.length
+    ? `${passed} passed, ${failed.length} failed`
+    : `All ${passed} tests passed`;
+  summary.className = failed.length ? 'fail' : 'pass';
+  window.__testResults = {
+    passed,
+    failed: failed.length,
+    failures: failed.map((f) => ({ name: f.name, error: String(f.err && f.err.message || f.err) })),
+  };
+  document.title = failed.length ? `FAIL (${failed.length})` : `PASS (${passed})`;
+})();
+</script>
+</body>
+</html>
